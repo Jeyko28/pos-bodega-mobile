@@ -13,7 +13,7 @@ export default function LoginScreen({ onLogin }) {
     if (!username.trim() || !password.trim()) return
     setCargando(true)
     setError(null)
-    const r = db.login(username.trim(), password.trim())
+    const r = await db.login(username.trim(), password.trim())
     setCargando(false)
     if (r.success) onLogin(r.usuario)
     else setError(r.error)

@@ -1,20 +1,24 @@
-import React, { useState, useCallback } from 'react'
+import React, { useState, useCallback, useEffect } from 'react'
 import { View, Text, TextInput, TouchableOpacity, StyleSheet, ScrollView, Alert } from 'react-native'
 import { useFocusEffect } from '@react-navigation/native'
 import { File, Paths } from 'expo-file-system'
 import * as Sharing from 'expo-sharing'
+import * as AuthSession from 'expo-auth-session'
 import db from '../data/db'
-import { FRECUENCIAS, DESTINOS, listarRespaldos } from '../data/respaldo'
-import { useSesion } from '../context/SesionContext'
+import { FRECUENCIAS, listarRespaldos } from '../data/respaldo'
+import { configDeRequest, DISCOVERY, intercambiarCodigoPorTokens, hayCuentaConectada, desconectarCuenta } from '../data/googleAuth'
+import { safDisponible, hayCarpetaElegida, elegirCarpetaPublica, olvidarCarpeta } from '../data/respaldoCarpeta'
 import { colors } from '../theme/colors'
 
 export default function ConfiguracionScreen() {
-  const { usuario, handleLogout } = useSesion()
   const [config, setConfig] = useState(null)
   const [guardando, setGuardando] = useState(false)
   const [exito, setExito] = useState(false)
   const [exportando, setExportando] = useState(false)
   const [respaldos, setRespaldos] = useState([])
+  const [driveConectado, setDriveConectado] = useState(false)
+  const [conectandoDrive, setConectandoDrive] = useState(false)
+  const [request, response, promptAsync] = AuthSession.useAuthRequest(configDeRequest(), DISCOVERY)
 
   async function exportarBackup() {
     setExportando(true)
@@ -39,7 +43,47 @@ export default function ConfiguracionScreen() {
   useFocusEffect(useCallback(() => {
     setConfig(db.getConfig())
     setRespaldos(listarRespaldos())
+    hayCuentaConectada().then(setDriveConectado)
   }, []))
+
+  // La respuesta de Google llega de forma asíncrona (el usuario sale de la app,
+  // elige su cuenta en el navegador, y vuelve) — se procesa en cuanto cambia,
+  // no dentro de una función que el usuario dispara directamente.
+  useEffect(() => {
+    if (response?.type !== 'success' || !request) return
+    setConectandoDrive(true)
+    intercambiarCodigoPorTokens(response.params.code, request.codeVerifier)
+      .then(() => setDriveConectado(true))
+      .catch(() => Alert.alert('Error', 'No se pudo conectar con Google Drive.'))
+      .finally(() => setConectandoDrive(false))
+  }, [response])
+
+  async function conectarDrive() {
+    setConectandoDrive(true)
+    const resultado = await promptAsync()
+    if (resultado.type !== 'success') setConectandoDrive(false)
+  }
+
+  function confirmarDesconectarDrive() {
+    Alert.alert('Desconectar Google Drive', '¿Seguro? Los respaldos futuros dejarán de subirse a Drive hasta que vuelvas a conectar la cuenta.', [
+      { text: 'Cancelar', style: 'cancel' },
+      { text: 'Desconectar', style: 'destructive', onPress: async () => { await desconectarCuenta(); setDriveConectado(false) } },
+    ])
+  }
+
+  const carpetaElegida = config ? hayCarpetaElegida(config) : false
+
+  async function elegirCarpeta() {
+    const resultado = await elegirCarpetaPublica()
+    if (resultado.success) setConfig(db.getConfig())
+  }
+
+  function confirmarOlvidarCarpeta() {
+    Alert.alert('Cambiar carpeta', 'Se te va a pedir elegir una carpeta nueva (puede ser la misma). Los respaldos ya guardados en la anterior no se mueven.', [
+      { text: 'Cancelar', style: 'cancel' },
+      { text: 'Elegir otra', onPress: async () => { await olvidarCarpeta(); await elegirCarpeta() } },
+    ])
+  }
 
   async function compartirArchivo(uri) {
     const disponible = await Sharing.isAvailableAsync()
@@ -65,23 +109,10 @@ export default function ConfiguracionScreen() {
     await db.updateConfig({ respaldo_frecuencia: id })
   }
 
-  function confirmarCerrarSesion() {
-    Alert.alert('Cerrar sesión', '¿Seguro que quieres salir?', [
-      { text: 'Cancelar', style: 'cancel' },
-      { text: 'Cerrar sesión', style: 'destructive', onPress: handleLogout },
-    ])
-  }
-
   if (!config) return <View style={styles.root} />
 
   return (
     <ScrollView style={styles.root} contentContainerStyle={{ padding: 16, gap: 16 }}>
-      <View style={styles.tarjeta}>
-        <Text style={styles.etiqueta}>Sesión actual</Text>
-        <Text style={styles.usuarioNombre}>{usuario?.nombre}</Text>
-        <Text style={styles.usuarioRol}>{usuario?.rol === 'admin' ? 'Administrador' : 'Cajero'} · @{usuario?.username}</Text>
-      </View>
-
       <View style={styles.tarjeta}>
         <Text style={styles.tituloSeccion}>🏪 Datos del negocio</Text>
         <Text style={styles.etiqueta}>Nombre del negocio</Text>
@@ -150,27 +181,59 @@ export default function ConfiguracionScreen() {
         )}
 
         <Text style={[styles.etiqueta, { marginTop: 8 }]}>Dónde se guarda</Text>
-        {DESTINOS.map(d => (
-          <View key={d.id} style={[styles.destinoFila, !d.disponible && styles.destinoNoDisponible]}>
-            <Text style={styles.destinoTexto}>{d.id === 'drive' ? '☁️' : '📱'}  {d.label}</Text>
-            <Text style={styles.destinoEstado}>{d.disponible ? 'Activo' : 'Próximamente'}</Text>
+        <View style={styles.destinoFila}>
+          <Text style={styles.destinoTexto}>📱  Este teléfono</Text>
+          <Text style={styles.destinoEstado}>Activo</Text>
+        </View>
+        <View style={styles.destinoFila}>
+          <Text style={styles.destinoTexto}>☁️  Google Drive</Text>
+          {driveConectado ? (
+            <TouchableOpacity onPress={confirmarDesconectarDrive}>
+              <Text style={[styles.destinoEstado, styles.destinoEstadoActivo]}>Conectado — Desconectar</Text>
+            </TouchableOpacity>
+          ) : (
+            <TouchableOpacity onPress={conectarDrive} disabled={!request || conectandoDrive}>
+              <Text style={styles.destinoAccion}>{conectandoDrive ? 'Conectando...' : 'Conectar'}</Text>
+            </TouchableOpacity>
+          )}
+        </View>
+        {safDisponible() && (
+          <View style={styles.destinoFila}>
+            <Text style={styles.destinoTexto}>📁  Carpeta del teléfono</Text>
+            {carpetaElegida ? (
+              <TouchableOpacity onPress={confirmarOlvidarCarpeta}>
+                <Text style={[styles.destinoEstado, styles.destinoEstadoActivo]}>Elegida — Cambiar</Text>
+              </TouchableOpacity>
+            ) : (
+              <TouchableOpacity onPress={elegirCarpeta}>
+                <Text style={styles.destinoAccion}>Elegir carpeta</Text>
+              </TouchableOpacity>
+            )}
           </View>
-        ))}
+        )}
+
         <Text style={styles.textoAyuda}>
-          Estas copias viven dentro de la app, en una carpeta privada que el explorador de archivos del teléfono no puede abrir. Por eso se listan aquí: toca cualquiera para enviarla a tu WhatsApp, correo o Drive.
+          {driveConectado
+            ? 'Cada respaldo automático también se sube a la carpeta "POS Bodega — Respaldos" en tu Drive.'
+            : 'Sin conectar, las copias solo viven dentro de la app. Toca "Conectar" e inicia sesión con tu cuenta de Google.'}
+          {' '}
+          {carpetaElegida
+            ? 'También se guarda una copia en la carpeta que elegiste, visible desde el explorador de archivos del teléfono y que sobrevive aunque desinstales la app.'
+            : safDisponible()
+              ? 'Elige una carpeta del teléfono para que el respaldo también quede visible en tu explorador de archivos, no solo dentro de la app.'
+              : ''}
+          {' '}La lista de abajo son copias dentro de la app, en una carpeta privada que el explorador de archivos no puede abrir — por eso se listan para enviarlas a mano.
         </Text>
-        <Text style={styles.textoAdvertencia}>
-          ⚠️ Una copia guardada aquí se pierde junto con el teléfono. Para estar protegido de verdad, envía el respaldo fuera del celular.
-        </Text>
+        {!driveConectado && !carpetaElegida && (
+          <Text style={styles.textoAdvertencia}>
+            ⚠️ Una copia guardada solo dentro de la app se pierde junto con el teléfono. Conecta Drive, elige una carpeta, o envía el respaldo por WhatsApp de vez en cuando.
+          </Text>
+        )}
 
         <TouchableOpacity style={styles.botonSecundario} onPress={exportarBackup} disabled={exportando}>
           <Text style={styles.botonSecundarioTexto}>{exportando ? 'Generando...' : '📤 Exportar backup ahora'}</Text>
         </TouchableOpacity>
       </View>
-
-      <TouchableOpacity style={styles.botonCerrarSesion} onPress={confirmarCerrarSesion}>
-        <Text style={styles.botonCerrarSesionTexto}>Cerrar sesión</Text>
-      </TouchableOpacity>
 
       <Text style={styles.version}>POS Bodega · Fase 1 (celular)</Text>
     </ScrollView>
@@ -188,22 +251,19 @@ const styles = StyleSheet.create({
   frecuenciaTexto: { color: colors.textMuted, fontWeight: '600', fontSize: 13, lineHeight: 18 },
   frecuenciaTextoActivo: { color: colors.accent },
   destinoFila: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: 10, paddingHorizontal: 12, borderRadius: 10, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.bg },
-  destinoNoDisponible: { opacity: 0.55 },
   destinoTexto: { color: colors.text, fontSize: 14, fontWeight: '600' },
   destinoEstado: { color: colors.textMuted, fontSize: 12 },
+  destinoEstadoActivo: { color: colors.accent, fontWeight: '700' },
+  destinoAccion: { color: colors.accent, fontSize: 13, fontWeight: '700' },
   respaldoFila: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: 10, paddingHorizontal: 12, borderRadius: 10, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.bg },
   respaldoFecha: { color: colors.text, fontSize: 13 },
   respaldoAccion: { color: colors.accent, fontSize: 13, fontWeight: '700' },
   textoAdvertencia: { color: colors.warning, fontSize: 12, lineHeight: 17 },
-  usuarioNombre: { color: colors.text, fontWeight: '700', fontSize: 16, marginTop: 2 },
-  usuarioRol: { color: colors.textMuted, fontSize: 13, marginTop: 2 },
   input: { backgroundColor: colors.input, borderWidth: 1, borderColor: colors.border, borderRadius: 10, padding: 12, color: colors.text, fontSize: 15 },
   botonGuardar: { backgroundColor: colors.primary, borderRadius: 12, padding: 16, alignItems: 'center' },
   botonGuardarTexto: { color: colors.primaryText, fontWeight: '700', fontSize: 16 },
   textoAyuda: { color: colors.textMuted, fontSize: 13, lineHeight: 18 },
   botonSecundario: { backgroundColor: colors.accentBg, borderWidth: 1, borderColor: colors.primary, borderRadius: 10, padding: 14, alignItems: 'center', marginTop: 4 },
   botonSecundarioTexto: { color: colors.accent, fontWeight: '700', fontSize: 14 },
-  botonCerrarSesion: { borderWidth: 1, borderColor: colors.danger, borderRadius: 12, padding: 16, alignItems: 'center' },
-  botonCerrarSesionTexto: { color: colors.danger, fontWeight: '700', fontSize: 15 },
   version: { color: colors.textMuted, fontSize: 11, textAlign: 'center', marginTop: 8 },
 })

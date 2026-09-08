@@ -28,6 +28,20 @@ npx expo start --tunnel --clear
 
 ---
 
+## Build de desarrollo (EAS)
+
+Expo Go ya no alcanza para probar Google Drive (necesita un identificador de app propio para el OAuth) ni para SAF. El proyecto está enlazado a EAS (`@jeykg/pos-bodega-mobile`) con perfiles en `eas.json`:
+
+```bash
+npx eas-cli build --platform android --profile development
+```
+
+Genera un APK instalable directo (sin Play Store) con `expo-dev-client`, que se conecta a Metro igual que Expo Go pero con el código nativo del proyecto (incluye SQLite, cámara, y lo que se vaya agregando). El keystore de firma lo genera y gestiona EAS en la nube — no hay archivo de keystore local que cuidar.
+
+Cualquier cambio en `app.json` bajo `android`/`ios` (permisos, `scheme`, plugins nuevos) es nativo: no basta con recargar la app, hay que compilar un build nuevo.
+
+---
+
 ## Estructura
 
 ```
@@ -75,19 +89,21 @@ Cada una costó tiempo de depuración o fue una decisión de producto deliberada
 
 - **El respaldo automático se dispara al abrir la app, no con un temporizador.** Un celular no puede correr tareas en segundo plano de forma confiable (iOS decide si las ejecuta, Android las limita). `data/respaldo.js` revisa al arrancar si ya pasó el periodo elegido y, si toca, guarda. Para una bodega que abre la app a diario, equivale a que sea automático.
 
-- **Google Drive como destino está preparado pero no conectado.** `DESTINOS` en `data/respaldo.js` es el punto donde se enchufa, y `crearRespaldo()` deja el archivo local escrito antes de cualquier subida.
+- **Google Drive está implementado en código, pendiente de probar en un build nuevo.** `data/googleAuth.js` maneja el login OAuth (Authorization Code + PKCE, vía `expo-auth-session`) y guarda el refresh token con `expo-secure-store`; `data/driveUpload.js` sube el respaldo a una carpeta "POS Bodega — Respaldos" en el Drive del usuario. `respaldo.js` sube automáticamente después de cada respaldo local si hay una cuenta conectada. El botón para conectar/desconectar vive en Ajustes → Copia de seguridad.
 
-  No funciona en Expo Go porque esa app usa un identificador compartido (`host.exp.Exponent`), así que Google no puede asociarle la redirección de OAuth. Se resuelve al compilar la app con identificador propio. Pendientes para ese día:
+  No funcionaba en Expo Go porque esa app usa un identificador compartido (`host.exp.Exponent`), así que Google no podía asociarle la redirección de OAuth — resuelto al compilar con identificador propio (ver "Identidad de la app" abajo). Estado de cada pieza:
 
-  0. *(Ya hecho)* Identidad de la app en `app.json`: `android.package` y `ios.bundleIdentifier` = `com.pos.bodega`, y `scheme` = `posbodega` para la redirección de OAuth. Se fijó antes de la primera instalación a propósito: cambiar el nombre de paquete después hace que Android trate la app como otra distinta y el usuario pierda sus datos.
-  1. Cliente OAuth en Google Cloud con el nombre de paquete y **las dos huellas SHA-1**: la del build de desarrollo y la de producción (si EAS maneja las credenciales, la de producción la tiene EAS). Registrar solo una es el error clásico: anda en desarrollo y falla en la versión entregada.
-  2. Permiso `drive.file` únicamente — la app solo ve los archivos que ella creó, y así se evitan los *scopes* restringidos que exigen auditoría de seguridad.
-  3. Pantalla de consentimiento publicada, lo que obliga a tener una **URL de política de privacidad**. En modo "Testing" solo entran las cuentas agregadas como probadoras.
-  4. Refresh token guardado con `expo-secure-store`, para conectar la cuenta una sola vez.
+  - *(Hecho)* Identidad de la app en `app.json`: `android.package` / `ios.bundleIdentifier` = `com.pos.bodega`. Se fijó antes de la primera instalación real a propósito: cambiar el nombre de paquete después hace que Android trate la app como otra distinta y el usuario pierda sus datos.
+  - *(Hecho)* Cliente OAuth tipo Android creado en Google Cloud (`953316471021-fss1su32i361nm6np4i3guh3i473lf3g.apps.googleusercontent.com`), con el SHA-1 del keystore que EAS generó y gestiona en la nube para los builds de este proyecto.
+  - *(Hecho)* Permiso `drive.file` únicamente — la app solo ve los archivos que ella creó, evitando los *scopes* restringidos que exigen auditoría de seguridad.
+  - *(Hecho)* Pantalla de consentimiento en modo "Testing" — solo las cuentas agregadas como probadoras pueden iniciar sesión. Publicarla (para cualquier usuario) exige antes una URL de política de privacidad.
+  - *(Hecho)* `scheme` en `app.json` incluye el esquema invertido del client ID (`com.googleusercontent.apps.953316471021-...`), que es el formato que Google exige para la redirección en clientes tipo Android. **Es configuración nativa: no toma efecto en el build ya instalado, hace falta compilar un APK nuevo para probar el login real.**
 
-  Con la app ya compilada también se puede reemplazar el disparo "al abrir la app" por un respaldo periódico real con `expo-background-task` (WorkManager en Android). En iOS sigue sin garantía, pero la plataforma objetivo es Android.
+  Si se necesita un segundo cliente OAuth para la build de producción (con su propio SHA-1 si algún día se firma fuera de EAS), se crea igual que este, apuntando al mismo proyecto de Google Cloud.
 
-- **Pendiente: guardar el respaldo en una carpeta pública de Android (decidido, falta el APK).** Hoy las copias van a `Paths.document`, que es el sandbox de la app: ocupa espacio real en el teléfono pero ningún explorador de archivos puede abrirlo, y se borra si el usuario desinstala. La solución acordada es Storage Access Framework: el usuario elige una vez su carpeta (ej. `Documentos/POS Bodega`), la ve desde su explorador y el respaldo **sobrevive a la desinstalación**. Es API exclusiva de Android y no se puede probar desde el iPhone de desarrollo, por eso va junto con el trabajo del APK.
+  Con la app ya en un APK real también se puede reemplazar el disparo "al abrir la app" por un respaldo periódico real con `expo-background-task` (WorkManager en Android). En iOS sigue sin garantía, pero la plataforma objetivo es Android.
+
+- **Storage Access Framework (SAF) está implementado en código, pendiente del mismo build que Drive.** `data/respaldoCarpeta.js` usa `expo-file-system/legacy` (el namespace donde vive `StorageAccessFramework` en este SDK — la API nueva de `File`/`Paths` no la expone) para que el usuario elija una carpeta real una sola vez; Android persiste ese permiso solo. Cada respaldo automático escribe ahí además de en el sandbox de la app, si hay una carpeta elegida. A diferencia de la lista dentro de la app (que sí se poda a 5 copias porque el usuario no puede entrar a limpiarla), en la carpeta pública no se borra nada automáticamente — es del usuario, la administra desde su propio explorador. Es API exclusiva de Android 11+; en iOS la sección no aparece y el respaldo local sigue funcionando igual.
 
 ### De producto
 

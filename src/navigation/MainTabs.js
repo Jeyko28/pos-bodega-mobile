@@ -9,6 +9,8 @@ import ClientesScreen from '../screens/ClientesScreen'
 import HistorialScreen from '../screens/HistorialScreen'
 import ConfiguracionScreen from '../screens/ConfiguracionScreen'
 import db from '../data/db'
+import { BotonNotificaciones, construirAvisos } from '../components/HeaderAcciones'
+import PanelUsuario from '../components/PanelUsuario'
 import { colors } from '../theme/colors'
 
 const Tab = createBottomTabNavigator()
@@ -50,9 +52,12 @@ function TabIcon({ ruta, focused, color }) {
 
 export default function MainTabs() {
   const [bajoStock, setBajoStock] = useState(0)
+  const [avisos, setAvisos] = useState([])
 
   function actualizarAlertas() {
-    setBajoStock(db.getProductosBajoStock().length)
+    const productos = db.getProductosBajoStock()
+    setBajoStock(productos.length)
+    setAvisos(construirAvisos({ bajoStock: productos, fiadosAntiguos: db.getFiadosAntiguos() }))
   }
 
   useEffect(() => { actualizarAlertas() }, [])
@@ -69,6 +74,8 @@ export default function MainTabs() {
         headerStyle: { backgroundColor: colors.card },
         headerTintColor: colors.text,
         headerShadowVisible: false,
+        headerLeft: () => <PanelUsuario />,
+        headerRight: () => <BotonNotificaciones avisos={avisos} />,
         tabBarStyle: { backgroundColor: colors.card, borderTopColor: colors.border },
         tabBarActiveTintColor: colors.accent,
         tabBarInactiveTintColor: colors.textMuted,

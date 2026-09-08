@@ -1,5 +1,8 @@
 import { File, Paths } from 'expo-file-system'
 import db from './db'
+import { hayCuentaConectada } from './googleAuth'
+import { subirArchivoADrive } from './driveUpload'
+import { hayCarpetaElegida, guardarEnCarpetaPublica } from './respaldoCarpeta'
 
 // Un celular no puede correr un temporizador propio de forma confiable: iOS decide
 // si deja ejecutar algo en segundo plano, y Android lo limita. Así que el respaldo
@@ -13,13 +16,6 @@ export const FRECUENCIAS = [
   { id: 'diario', label: 'Diario', dias: 1 },
   { id: 'semanal', label: 'Semanal', dias: 7 },
   { id: 'mensual', label: 'Mensual', dias: 30 },
-]
-
-// Los destinos se resuelven acá para que agregar Google Drive sea sumar un caso,
-// sin tocar la lógica de cuándo toca respaldar.
-export const DESTINOS = [
-  { id: 'local', label: 'Este teléfono', disponible: true },
-  { id: 'drive', label: 'Google Drive', disponible: false },
 ]
 
 function diasDeFrecuencia(id) {
@@ -39,12 +35,12 @@ function nombreDeHoy() {
   return `${PREFIJO}${new Date().toISOString().slice(0, 10)}.json`
 }
 
-function guardarLocal() {
+function guardarLocal(contenido) {
   const nombre = nombreDeHoy()
   const archivo = new File(Paths.document, nombre)
   if (archivo.exists) archivo.delete()
   archivo.create()
-  archivo.write(db.getBackupJSON())
+  archivo.write(contenido)
   return { nombre, uri: archivo.uri }
 }
 
@@ -62,7 +58,8 @@ function registrarYPodar(nombre, archivosPrevios) {
 
 export async function crearRespaldo() {
   const config = db.getConfig()
-  const { nombre, uri } = guardarLocal()
+  const contenido = db.getBackupJSON()
+  const { nombre, uri } = guardarLocal(contenido)
   const archivos = registrarYPodar(nombre, config.respaldo_archivos || [])
 
   await db.updateConfig({
@@ -70,9 +67,20 @@ export async function crearRespaldo() {
     respaldo_archivos: archivos,
   })
 
-  // Cuando exista el destino Drive, la subida va acá: el archivo local ya está
-  // escrito y sirve igual como copia de seguridad si la subida falla.
-  return { nombre, uri }
+  // El archivo local ya quedó escrito antes de intentar Drive o la carpeta
+  // pública: si cualquiera de los dos falla (sin señal, permiso revocado,
+  // token vencido), el respaldo de este momento no se pierde.
+  let drive = null
+  if (await hayCuentaConectada()) {
+    drive = await subirArchivoADrive(uri, nombre)
+  }
+
+  let carpeta = null
+  if (hayCarpetaElegida(config)) {
+    carpeta = await guardarEnCarpetaPublica(nombre, contenido)
+  }
+
+  return { nombre, uri, drive, carpeta }
 }
 
 // Las copias viven en el sandbox de la app, así que el usuario no puede llegar a

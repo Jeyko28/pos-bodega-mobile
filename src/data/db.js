@@ -1,4 +1,5 @@
 import * as SQLite from 'expo-sqlite'
+import * as Crypto from 'expo-crypto'
 import AsyncStorage from '@react-native-async-storage/async-storage'
 
 // Antes todos los datos vivían en un solo JSON de AsyncStorage que se reescribía
@@ -201,6 +202,35 @@ async function migrarDesdeAsyncStorage() {
   escribirConfig('migrado_desde_asyncstorage', true)
 }
 
+// ─── CONTRASEÑAS ────────────────────────────────────────────────────
+// Se guardan como `sha256$<salt>$<hash>`, nunca en texto plano. El salt es
+// distinto por usuario, así que dos personas con la misma contraseña no
+// producen el mismo hash y no sirven las tablas precalculadas.
+//
+// expo-crypto no ofrece PBKDF2/bcrypt (solo funciones de digest), así que esto
+// no resiste una fuerza bruta dedicada contra una contraseña corta. La defensa
+// principal sigue siendo que la base vive en el almacenamiento privado de la
+// app; el cifrado es una capa extra para que la contraseña no quede legible
+// ante quien logre leer el archivo.
+const PREFIJO_HASH = 'sha256$'
+
+function generarSalt() {
+  return Array.from(Crypto.getRandomBytes(16)).map(b => b.toString(16).padStart(2, '0')).join('')
+}
+
+async function hashearPassword(password, salt = generarSalt()) {
+  const hash = await Crypto.digestStringAsync(Crypto.CryptoDigestAlgorithm.SHA256, `${salt}${password}`)
+  return `${PREFIJO_HASH}${salt}$${hash}`
+}
+
+async function passwordCoincide(password, almacenado) {
+  // Contraseñas creadas antes de este cambio siguen en texto plano; se aceptan
+  // una vez y se reescriben cifradas en el login (ver abajo).
+  if (!almacenado?.startsWith(PREFIJO_HASH)) return password === almacenado
+  const [, salt] = almacenado.split('$')
+  return (await hashearPassword(password, salt)) === almacenado
+}
+
 // ─── SETUP ──────────────────────────────────────────────────────────
 function isSetupCompletado() { return leerConfig('setup_completado', false) === true }
 
@@ -208,7 +238,7 @@ async function completarSetup({ negocioNombre, adminNombre, adminUsername, admin
   const creadoEn = new Date().toISOString()
   const r = sql.runSync(
     'INSERT INTO usuarios (nombre, username, password, rol, activo, creado_en) VALUES (?, ?, ?, ?, 1, ?)',
-    adminNombre, adminUsername, adminPassword, 'admin', creadoEn)
+    adminNombre, adminUsername, await hashearPassword(adminPassword), 'admin', creadoEn)
   escribirConfig('negocio_nombre', negocioNombre)
   escribirConfig('setup_completado', true)
   return {
@@ -218,12 +248,46 @@ async function completarSetup({ negocioNombre, adminNombre, adminUsername, admin
 }
 
 // ─── AUTH / USUARIOS ────────────────────────────────────────────────
-function login(username, password) {
-  const u = sql.getFirstSync(
-    'SELECT id, nombre, username, rol, activo, creado_en FROM usuarios WHERE username = ? AND password = ? AND activo = 1',
-    username, password)
-  if (!u) return { success: false, error: 'Usuario o contraseña incorrectos' }
-  return { success: true, usuario: { ...u, activo: true } }
+async function login(username, password) {
+  const u = sql.getFirstSync('SELECT * FROM usuarios WHERE username = ? AND activo = 1', username)
+  // El mismo mensaje para usuario inexistente y contraseña errada: decir cuál
+  // de los dos falló le confirma a un extraño qué usuarios existen.
+  const error = { success: false, error: 'Usuario o contraseña incorrectos' }
+  if (!u) return error
+  if (!(await passwordCoincide(password, u.password))) return error
+
+  // Migración transparente: si la contraseña estaba en texto plano y acertó,
+  // se reescribe cifrada. Así las cuentas viejas se actualizan solas al entrar,
+  // sin obligar a nadie a resetear nada.
+  if (!u.password.startsWith(PREFIJO_HASH)) {
+    sql.runSync('UPDATE usuarios SET password = ? WHERE id = ?', await hashearPassword(password), u.id)
+  }
+
+  const { password: _, ...usuario } = u
+  return { success: true, usuario: { ...usuario, activo: true } }
+}
+
+async function cambiarPassword({ usuarioId, actual, nueva }) {
+  const u = sql.getFirstSync('SELECT id, password FROM usuarios WHERE id = ?', usuarioId)
+  if (!u || !(await passwordCoincide(actual, u.password))) {
+    return { success: false, error: 'La contraseña actual no es correcta' }
+  }
+  if (!nueva || nueva.length < 4) return { success: false, error: 'La nueva contraseña debe tener al menos 4 caracteres' }
+  sql.runSync('UPDATE usuarios SET password = ? WHERE id = ?', await hashearPassword(nueva), usuarioId)
+  return { success: true }
+}
+
+// Los usuarios no se borran: las ventas guardan quién las hizo, y borrarlo
+// dejaría el historial sin dueño. Desactivar impide entrar sin perder ese rastro.
+async function setUsuarioActivo(id, activo) {
+  const admins = sql.getFirstSync("SELECT COUNT(*) AS n FROM usuarios WHERE rol = 'admin' AND activo = 1")
+  const objetivo = sql.getFirstSync('SELECT rol, activo FROM usuarios WHERE id = ?', id)
+  if (!objetivo) return { success: false, error: 'Usuario no encontrado' }
+  if (!activo && objetivo.rol === 'admin' && admins.n <= 1) {
+    return { success: false, error: 'No puedes desactivar al único administrador' }
+  }
+  sql.runSync('UPDATE usuarios SET activo = ? WHERE id = ?', activo ? 1 : 0, id)
+  return { success: true }
 }
 
 function getUsuarios() {
@@ -237,7 +301,7 @@ async function addUsuario({ nombre, username, password, rol }) {
   const creadoEn = new Date().toISOString()
   const r = sql.runSync(
     'INSERT INTO usuarios (nombre, username, password, rol, activo, creado_en) VALUES (?, ?, ?, ?, 1, ?)',
-    nombre, username, password, rol || 'cajero', creadoEn)
+    nombre, username, await hashearPassword(password), rol || 'cajero', creadoEn)
   return { success: true, usuario: { id: r.lastInsertRowId, nombre, username, rol: rol || 'cajero', activo: true, creado_en: creadoEn } }
 }
 
@@ -353,6 +417,20 @@ function getResumenFiado() {
     FROM fiado WHERE estado = 'pendiente'
   `)
   return { total_deuda: r.total_deuda, clientes_deuda: r.clientes_deuda, total_fiados: r.total_fiados }
+}
+
+// Fiados que llevan demasiado sin cobrarse. No hay "fecha de vencimiento" en una
+// bodega: el fiado es informal, así que se mide por antigüedad desde que se dio.
+function getFiadosAntiguos(dias = 15) {
+  const limite = new Date()
+  limite.setDate(limite.getDate() - dias)
+  return sql.getAllSync(`
+    SELECT f.id, f.saldo, f.fecha, f.concepto, c.nombre AS nombre_cliente
+    FROM fiado f
+    LEFT JOIN clientes c ON c.id = f.cliente_id
+    WHERE f.estado = 'pendiente' AND f.fecha < ?
+    ORDER BY f.fecha ASC
+  `, limite.toISOString())
 }
 
 // ─── VENTAS ─────────────────────────────────────────────────────────
@@ -525,7 +603,10 @@ function getBackupJSON() {
     productos: sql.getAllSync('SELECT * FROM productos'),
     ventas: sql.getAllSync('SELECT * FROM ventas'),
     detalle_ventas: sql.getAllSync('SELECT * FROM detalle_ventas'),
-    usuarios: sql.getAllSync('SELECT * FROM usuarios'),
+    // Sin la columna password a propósito: este archivo sale del teléfono (Drive,
+    // WhatsApp, carpeta compartida) y las contraseñas no deben viajar con él.
+    // Al restaurar habrá que volver a definirlas.
+    usuarios: sql.getAllSync('SELECT id, nombre, username, rol, activo, creado_en FROM usuarios'),
     clientes: sql.getAllSync('SELECT * FROM clientes'),
     fiado: sql.getAllSync('SELECT * FROM fiado'),
     pagos_fiado: sql.getAllSync('SELECT * FROM pagos_fiado'),
@@ -538,11 +619,11 @@ function getBackupJSON() {
 export default {
   initDB,
   isSetupCompletado, completarSetup,
-  login, getUsuarios, addUsuario,
+  login, getUsuarios, addUsuario, cambiarPassword, setUsuarioActivo,
   getProductos, addProducto, updateProducto, deleteProducto, getProductosBajoStock,
   getCategoriasCustom, addCategoriaCustom,
   getConfig, updateConfig, getBackupJSON,
   getClientes, addCliente, buscarCliente,
-  getFiadoCliente, addFiado, pagarFiado, getResumenFiado,
+  getFiadoCliente, addFiado, pagarFiado, getResumenFiado, getFiadosAntiguos,
   realizarVenta, getHistorialVentas, getDetalleVenta, getResumenHoy, getResumenPeriodo, getCierreCaja,
 }
