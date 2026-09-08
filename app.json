@@ -1,0 +1,47 @@
+{
+  "expo": {
+    "name": "POS Bodega",
+    "slug": "pos-bodega-mobile",
+    "scheme": "posbodega",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "light",
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.pos.bodega"
+    },
+    "android": {
+      "package": "com.pos.bodega",
+      "adaptiveIcon": {
+        "backgroundColor": "#E6F4FE",
+        "foregroundImage": "./assets/android-icon-foreground.png",
+        "backgroundImage": "./assets/android-icon-background.png",
+        "monochromeImage": "./assets/android-icon-monochrome.png"
+      },
+      "permissions": [
+        "android.permission.CAMERA",
+        "android.permission.RECORD_AUDIO"
+      ]
+    },
+    "web": {
+      "favicon": "./assets/favicon.png"
+    },
+    "plugins": [
+      "expo-sharing",
+      [
+        "expo-camera",
+        {
+          "cameraPermission": "Necesitamos la cámara para escanear el código de barras de tus productos."
+        }
+      ],
+      "expo-sqlite"
+    ],
+    "extra": {
+      "eas": {
+        "projectId": "ce0479f5-4c8f-4cdb-935f-b355c304d2a9"
+      }
+    },
+    "owner": "jeykg"
+  }
+}

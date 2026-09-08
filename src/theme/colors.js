@@ -1,0 +1,20 @@
+// Paleta clara — un crema suave en vez de blanco puro, para no cansar la vista.
+export const colors = {
+  bg: '#F6F3EC',
+  card: '#FFFFFF',
+  input: '#FFFFFF',
+  border: '#E4DFD1',
+  borderStrong: '#D6CFBC',
+  text: '#26241C',
+  textMuted: '#7B7565',
+  placeholder: '#AFA894',
+  primary: '#10B981',
+  primaryText: '#0B2A1E',
+  accent: '#0D8F63',
+  accentBg: 'rgba(16,185,129,0.14)',
+  danger: '#DC2626',
+  dangerBg: 'rgba(220,38,38,0.10)',
+  warning: '#B45309',
+  warningBg: 'rgba(217,119,6,0.12)',
+  overlay: 'rgba(38,33,22,0.5)',
+}
