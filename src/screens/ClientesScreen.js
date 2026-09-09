@@ -3,6 +3,7 @@ import { View, Text, TextInput, TouchableOpacity, FlatList, StyleSheet, Modal, S
 import { useFocusEffect } from '@react-navigation/native'
 import db from '../data/db'
 import { colors } from '../theme/colors'
+import { armarMensajeCobranza, abrirWhatsApp } from '../utils/cobranza'
 
 const fmt = (n) => `S/ ${Number(n).toFixed(2)}`
 const METODOS = ['Efectivo', 'Yape', 'Plin']
@@ -16,6 +17,7 @@ export default function ClientesScreen() {
   const [fiados, setFiados] = useState([])
   const [montoPago, setMontoPago] = useState({})
   const [metodoPago, setMetodoPago] = useState({})
+  const [telefonoEdit, setTelefonoEdit] = useState('')
 
   useFocusEffect(useCallback(() => { cargar() }, []))
 
@@ -32,6 +34,29 @@ export default function ClientesScreen() {
   function abrirDetalle(c) {
     setClienteDetalle(c)
     setFiados(db.getFiadoCliente(c.id))
+    setTelefonoEdit(c.telefono || '')
+  }
+
+  async function guardarTelefono() {
+    await db.updateCliente({ id: clienteDetalle.id, telefono: telefonoEdit })
+    const actualizados = db.getClientes()
+    setClientes(actualizados)
+    setClienteDetalle(actualizados.find(c => c.id === clienteDetalle.id))
+  }
+
+  const deudaTotal = fiados.filter(f => f.estado === 'pendiente').reduce((s, f) => s + f.saldo, 0)
+  const diasMasAntiguo = fiados
+    .filter(f => f.estado === 'pendiente')
+    .reduce((max, f) => Math.max(max, Math.floor((Date.now() - new Date(f.fecha)) / 86400000)), 0)
+
+  async function cobrarPorWhatsApp() {
+    const mensaje = armarMensajeCobranza({
+      cliente: clienteDetalle,
+      deuda: deudaTotal,
+      diasMasAntiguo,
+      negocio: db.getConfig().negocio_nombre,
+    })
+    await abrirWhatsApp({ telefono: clienteDetalle.telefono, mensaje })
   }
 
   async function pagar(fiadoId) {
@@ -85,6 +110,31 @@ export default function ClientesScreen() {
           <Pressable style={StyleSheet.absoluteFill} onPress={() => setClienteDetalle(null)} />
           <View style={[styles.modalCaja, { maxHeight: '80%' }]}>
             <Text style={styles.modalTitulo}>{clienteDetalle?.nombre}</Text>
+
+            {deudaTotal > 0 && (
+              <View style={styles.bloqueCobranza}>
+                <View style={styles.filaTelefono}>
+                  <TextInput
+                    style={[styles.input, { flex: 1 }]}
+                    placeholder="Teléfono (para escribirle)"
+                    placeholderTextColor={colors.placeholder}
+                    keyboardType="phone-pad"
+                    value={telefonoEdit}
+                    onChangeText={setTelefonoEdit}
+                    onBlur={guardarTelefono}
+                  />
+                </View>
+                <TouchableOpacity
+                  style={[styles.botonWhatsApp, !telefonoEdit.trim() && styles.botonDeshabilitado]}
+                  onPress={cobrarPorWhatsApp}
+                  disabled={!telefonoEdit.trim()}
+                >
+                  <Text style={styles.botonWhatsAppTexto}>
+                    💬  Recordarle por WhatsApp · {fmt(deudaTotal)}
+                  </Text>
+                </TouchableOpacity>
+              </View>
+            )}
             <ScrollView keyboardShouldPersistTaps="handled">
               {fiados.length === 0 && <Text style={styles.vacio}>Sin historial de fiado.</Text>}
               {fiados.map(f => (
@@ -140,6 +190,11 @@ const styles = StyleSheet.create({
   botonGhostTexto: { color: colors.textMuted, fontWeight: '600' },
   botonPrimario: { flex: 1, padding: 14, borderRadius: 10, backgroundColor: colors.primary, alignItems: 'center' },
   botonPrimarioTexto: { color: colors.primaryText, fontWeight: '700' },
+  bloqueCobranza: { gap: 8, paddingBottom: 12, marginBottom: 4, borderBottomWidth: 1, borderBottomColor: colors.border },
+  filaTelefono: { flexDirection: 'row', gap: 8 },
+  botonWhatsApp: { paddingVertical: 14, borderRadius: 10, backgroundColor: '#25D366', alignItems: 'center' },
+  botonWhatsAppTexto: { color: '#0B2A1E', fontWeight: '800', fontSize: 14 },
+  botonDeshabilitado: { opacity: 0.45 },
   fiadoFila: { backgroundColor: colors.bg, borderRadius: 10, padding: 12, marginBottom: 8, borderWidth: 1, borderColor: colors.border },
   fiadoConcepto: { color: colors.text, fontSize: 13 },
   fiadoFecha: { color: colors.textMuted, fontSize: 11, marginTop: 2 },

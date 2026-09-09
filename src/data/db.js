@@ -385,6 +385,24 @@ async function asignarCodigo(productoId, codigo) {
   return { success: true }
 }
 
+// Los que más se venden, para tenerlos a un toque en hora punta. Se miden por
+// número de veces vendidos y no por unidades: cinco ventas de un pan pesan más
+// que una venta de 20 kilos de arroz a la hora de decidir qué poner a la mano.
+function getMasVendidos(limite = 12, dias = 30) {
+  const desde = new Date()
+  desde.setDate(desde.getDate() - dias)
+  return sql.getAllSync(`
+    SELECT p.*, COUNT(d.id) AS veces
+    FROM detalle_ventas d
+    JOIN ventas v ON v.id = d.venta_id
+    JOIN productos p ON p.id = d.producto_id
+    WHERE v.fecha >= ?
+    GROUP BY p.id
+    ORDER BY veces DESC
+    LIMIT ?
+  `, desde.toISOString(), limite)
+}
+
 function getProductosBajoStock() {
   const u = getConfig().umbral_stock_bajo || 5
   return sql.getAllSync('SELECT * FROM productos WHERE stock <= ? ORDER BY stock ASC', u)
@@ -423,6 +441,13 @@ async function addCliente({ nombre, telefono, referencia, dni_ruc }) {
 // El filtro va en JS y no en SQL a propósito: el LIKE de SQLite no ignora
 // tildes, así que buscar "nunez" nunca encontraría a "Núñez". La lista de
 // clientes de una bodega es chica, el costo de filtrar en memoria es nulo.
+async function updateCliente({ id, nombre, telefono, referencia, dni_ruc }) {
+  sql.runSync(
+    'UPDATE clientes SET nombre = COALESCE(?, nombre), telefono = ?, referencia = ?, dni_ruc = ? WHERE id = ?',
+    nombre ?? null, telefono || null, referencia || null, dni_ruc || null, id)
+  return sql.getFirstSync('SELECT * FROM clientes WHERE id = ?', id)
+}
+
 function buscarCliente(query) {
   const clientes = sql.getAllSync(SQL_CLIENTES)
   const q = normalizarTexto(query)
@@ -759,10 +784,10 @@ export default {
   isSetupCompletado, completarSetup,
   login, getUsuarios, addUsuario, cambiarPassword, setUsuarioActivo,
   getProductos, addProducto, updateProducto, deleteProducto, getProductosBajoStock,
-  addProductosLote, asignarCodigo, ingresarMercaderia,
+  addProductosLote, asignarCodigo, ingresarMercaderia, getMasVendidos,
   getCategoriasCustom, addCategoriaCustom,
   getConfig, updateConfig, getBackupJSON, restaurarBackup, validarBackup,
-  getClientes, addCliente, buscarCliente,
+  getClientes, addCliente, updateCliente, buscarCliente,
   getFiadoCliente, addFiado, pagarFiado, getResumenFiado, getFiadosAntiguos,
   realizarVenta, getHistorialVentas, getDetalleVenta, getResumenHoy, getResumenPeriodo, getCierreCaja,
 }

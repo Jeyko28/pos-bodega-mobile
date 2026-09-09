@@ -57,6 +57,8 @@ export default function POSScreen() {
   const [modoGranel, setModoGranel] = useState('monto')
   const [categoriaFiltro, setCategoriaFiltro] = useState(null)
   const [categoriasCustom, setCategoriasCustom] = useState([])
+  const [masVendidos, setMasVendidos] = useState([])
+  const [vistaRapida, setVistaRapida] = useState(null)
   const [scanner, setScanner] = useState(false)
   const [mensajeScanner, setMensajeScanner] = useState(null)
   const [codigoHuerfano, setCodigoHuerfano] = useState(null)
@@ -89,6 +91,12 @@ export default function POSScreen() {
     setProductos(db.getProductos())
     setClientes(db.getClientes())
     setCategoriasCustom(db.getCategoriasCustom())
+    const top = db.getMasVendidos()
+    setMasVendidos(top)
+    // Si la bodega ya tiene historial, la vista rápida es la que conviene tener
+    // delante en hora punta. Sin historial no hay nada que mostrar y se cae
+    // sola a la lista completa.
+    if (top.length && vistaRapida === null) setVistaRapida(true)
   }
 
   const carritoActivo = carritos.find(c => c.id === carritoActivoId) || carritos[0]
@@ -313,6 +321,10 @@ export default function POSScreen() {
   // que no filtra nada solo estorba en la pantalla más usada del día. Las categorías
   // desconocidas (ej. "General", el valor por defecto) también se listan: si no,
   // esos productos quedarían imposibles de encontrar filtrando.
+  // Buscar algo saca de la vista rápida automáticamente: si el cajero escribe,
+  // es porque lo que quiere no estaba entre los botones.
+  const mostrandoRapido = vistaRapida && !busqueda.trim() && masVendidos.length > 0
+
   const conocidas = [...CATEGORIAS_BASE, ...categoriasCustom]
   const categoriasConProductos = [
     ...conocidas.filter(c => productos.some(p => p.categoria === c.id)),
@@ -423,14 +435,23 @@ export default function POSScreen() {
         </TouchableOpacity>
       </View>
 
-      {categoriasConProductos.length > 1 && (
+      {(categoriasConProductos.length > 1 || masVendidos.length > 0) && (
         <View style={chips.fila}>
           <ScrollView horizontal showsHorizontalScrollIndicator={false} style={chips.scroll} contentContainerStyle={chips.contenido}>
-            <TouchableOpacity onPress={() => setCategoriaFiltro(null)} style={[chips.chip, !categoriaFiltro && chips.chipActivo]}>
-              <Text style={[chips.texto, !categoriaFiltro && chips.textoActivo]}>Todo</Text>
+            {masVendidos.length > 0 && (
+              <TouchableOpacity
+                onPress={() => { setVistaRapida(true); setCategoriaFiltro(null); setBusqueda('') }}
+                style={[chips.chip, vistaRapida && chips.chipActivo]}
+              >
+                <Text style={chips.icono}>⚡</Text>
+                <Text style={[chips.texto, vistaRapida && chips.textoActivo]}>Rápido</Text>
+              </TouchableOpacity>
+            )}
+            <TouchableOpacity onPress={() => { setCategoriaFiltro(null); setVistaRapida(false) }} style={[chips.chip, !categoriaFiltro && !vistaRapida && chips.chipActivo]}>
+              <Text style={[chips.texto, !categoriaFiltro && !vistaRapida && chips.textoActivo]}>Todo</Text>
             </TouchableOpacity>
             {categoriasConProductos.map(c => (
-              <TouchableOpacity key={c.id} onPress={() => setCategoriaFiltro(c.id)} style={[chips.chip, categoriaFiltro === c.id && chips.chipActivo]}>
+              <TouchableOpacity key={c.id} onPress={() => { setCategoriaFiltro(c.id); setVistaRapida(false) }} style={[chips.chip, categoriaFiltro === c.id && chips.chipActivo]}>
                 <Text style={chips.icono}>{c.icon}</Text>
                 <Text style={[chips.texto, categoriaFiltro === c.id && chips.textoActivo]}>{c.id}</Text>
               </TouchableOpacity>
@@ -439,7 +460,32 @@ export default function POSScreen() {
         </View>
       )}
 
+      {mostrandoRapido ? (
+        // Botones grandes de lo que más se vende: en hora punta el cajero no
+        // puede scrollear 110 productos ni ponerse a tipear nombres.
+        <FlatList
+          key="rapido"
+          data={masVendidos}
+          keyExtractor={p => String(p.id)}
+          numColumns={2}
+          style={styles.listaProductos}
+          columnWrapperStyle={{ gap: 8 }}
+          renderItem={({ item }) => (
+            <TouchableOpacity
+              style={[styles.botonRapido, parseFloat(item.stock) <= 0 && styles.filaSinStock]}
+              onPress={() => agregarProducto(item)}
+            >
+              <Text style={styles.iconoRapido}>{iconoCategoria(item.categoria, categoriasCustom)}</Text>
+              <Text style={styles.nombreRapido} numberOfLines={2}>{item.nombre}</Text>
+              <Text style={styles.precioRapido}>
+                {fmt(item.precio)}{item.tipo_venta === 'granel' ? `/${item.unidad || 'kg'}` : ''}
+              </Text>
+            </TouchableOpacity>
+          )}
+        />
+      ) : (
       <FlatList
+        key="lista"
         data={productosFiltrados}
         keyExtractor={p => String(p.id)}
         style={styles.listaProductos}
@@ -462,6 +508,7 @@ export default function POSScreen() {
         )}
         ListEmptyComponent={<Text style={styles.vacio}>No hay productos que coincidan.</Text>}
       />
+      )}
 
       {/* Carrito activo */}
       <View style={styles.panelCarrito}>
@@ -750,6 +797,10 @@ const styles = StyleSheet.create({
   filaProducto: { flexDirection: 'row', alignItems: 'center', backgroundColor: colors.card, borderRadius: 10, padding: 12, marginBottom: 8, borderWidth: 1, borderColor: colors.border },
   iconoProducto: { fontSize: 20, lineHeight: 26, marginRight: 10 },
   filaSinStock: { opacity: 0.5, borderStyle: 'dashed' },
+  botonRapido: { flex: 1, minHeight: 96, backgroundColor: colors.card, borderRadius: 12, borderWidth: 1, borderColor: colors.border, padding: 12, marginBottom: 8, justifyContent: 'space-between' },
+  iconoRapido: { fontSize: 22, lineHeight: 28 },
+  nombreRapido: { color: colors.text, fontWeight: '700', fontSize: 14, marginTop: 4 },
+  precioRapido: { color: colors.accent, fontWeight: '800', fontSize: 17, marginTop: 4 },
   nuevoProductoCaja: { marginTop: 10, paddingTop: 12, borderTopWidth: 1, borderTopColor: colors.border, gap: 8 },
   nuevoProductoTitulo: { color: colors.textMuted, fontSize: 12, fontWeight: '700' },
   nuevoProductoFila: { flexDirection: 'row', gap: 8 },
