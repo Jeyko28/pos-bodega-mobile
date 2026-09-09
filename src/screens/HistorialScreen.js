@@ -1,7 +1,7 @@
 import React, { useState, useCallback } from 'react'
 import { View, Text, TextInput, FlatList, StyleSheet, TouchableOpacity, Modal, ScrollView, Pressable, Alert } from 'react-native'
 import { useFocusEffect } from '@react-navigation/native'
-import db from '../data/db'
+import db, { MOTIVOS_SALIDA } from '../data/db'
 import { colors } from '../theme/colors'
 import { chips } from '../theme/chips'
 import { compartirTicket } from '../utils/ticket'
@@ -36,12 +36,19 @@ export default function HistorialScreen() {
   const [notaCierre, setNotaCierre] = useState('')
   const [guardandoCaja, setGuardandoCaja] = useState(false)
   const [sesiones, setSesiones] = useState([])
+  const [salidaMonto, setSalidaMonto] = useState('')
+  const [salidaMotivo, setSalidaMotivo] = useState('Proveedor')
 
-  useFocusEffect(useCallback(() => {
-    setVentas(db.getHistorialVentas())
-    setCaja(db.getEstadoCaja())
-    cargarResumen(periodo)
-  }, [periodo]))
+  useFocusEffect(useCallback(() => { recargar() }, [periodo]))
+
+  // El período ahora también acota la lista, no solo los totales de arriba:
+  // antes decía "Hoy" y debajo listaba las ventas de todos los tiempos.
+  function desdeDelPeriodo(p) {
+    const desde = new Date()
+    if (p === 'hoy') desde.setHours(0, 0, 0, 0)
+    else desde.setDate(desde.getDate() - (p === 'semana' ? 7 : 30))
+    return desde.toISOString()
+  }
 
   function cargarResumen(p) {
     if (p === 'hoy') setResumen(db.getResumenHoy())
@@ -54,6 +61,7 @@ export default function HistorialScreen() {
     setFondoInicial('')
     setEfectivoContado('')
     setNotaCierre('')
+    setSalidaMonto('')
   }
 
   function abrirVistaCierre() {
@@ -68,6 +76,15 @@ export default function HistorialScreen() {
   function abrirHistorialCaja() {
     setSesiones(db.getSesionesCaja())
     setVistaCaja('historial')
+  }
+
+  async function confirmarSalida() {
+    setGuardandoCaja(true)
+    const r = await db.registrarSalidaCaja({ monto: salidaMonto, motivo: salidaMotivo, usuarioId: usuario?.id })
+    setGuardandoCaja(false)
+    if (!r.success) { Alert.alert('No se pudo anotar', r.error); return }
+    setCaja(db.getEstadoCaja())
+    cerrarVistaCaja()
   }
 
   async function confirmarApertura() {
@@ -104,7 +121,7 @@ export default function HistorialScreen() {
   const puedeCorregir = ventaSel && ventaSel.tipo !== 'pago_fiado' && !ventaSel.es_fiado && !ventaSel.anulada
 
   function recargar() {
-    setVentas(db.getHistorialVentas())
+    setVentas(db.getHistorialVentas(desdeDelPeriodo(periodo)))
     setCaja(db.getEstadoCaja())
     cargarResumen(periodo)
   }
@@ -205,10 +222,19 @@ export default function HistorialScreen() {
             <Text style={styles.cajaDetalle}>Ábrela al empezar el día con el sencillo que dejas en el cajón, y al cerrar la app te dice si cuadra.</Text>
           </>
         )}
+        {caja?.total_salidas > 0 && (
+          <Text style={styles.cajaDetalle}>Sacaste {fmt(caja.total_salidas)} del cajón en este turno.</Text>
+        )}
         <View style={styles.cajaBotones}>
-          <TouchableOpacity style={styles.botonGhost} onPress={abrirHistorialCaja}>
-            <Text style={styles.botonGhostTexto}>Cierres anteriores</Text>
-          </TouchableOpacity>
+          {caja?.abierta ? (
+            <TouchableOpacity style={styles.botonGhost} onPress={() => { setSalidaMonto(''); setSalidaMotivo('Proveedor'); setVistaCaja('salida') }}>
+              <Text style={styles.botonGhostTexto}>💸  Saqué plata</Text>
+            </TouchableOpacity>
+          ) : (
+            <TouchableOpacity style={styles.botonGhost} onPress={abrirHistorialCaja}>
+              <Text style={styles.botonGhostTexto}>Cierres anteriores</Text>
+            </TouchableOpacity>
+          )}
           {caja?.abierta ? (
             <TouchableOpacity style={styles.botonPrimario} onPress={abrirVistaCierre}>
               <Text style={styles.botonPrimarioTexto}>🧮  Cerrar caja</Text>
@@ -236,8 +262,53 @@ export default function HistorialScreen() {
             <Text style={[styles.total, !!item.anulada && styles.totalAnulado]}>{fmt(item.total)}</Text>
           </TouchableOpacity>
         )}
-        ListEmptyComponent={<Text style={styles.vacio}>{metodoFiltro ? `No hay ventas con ${metodoFiltro}.` : 'Todavía no hay ventas registradas.'}</Text>}
+        ListEmptyComponent={<Text style={styles.vacio}>{metodoFiltro ? `No hay ventas con ${metodoFiltro} ${etiquetaPeriodo}.` : `Todavía no hay ventas ${etiquetaPeriodo}.`}</Text>}
       />
+
+      <Modal visible={vistaCaja === 'salida'} transparent animationType="slide" onRequestClose={cerrarVistaCaja}>
+        <View style={[styles.modalFondo, { paddingBottom: alturaTeclado }]}>
+          <Pressable style={StyleSheet.absoluteFill} onPress={cerrarVistaCaja} />
+          <ScrollView style={styles.modalScrollLimite} contentContainerStyle={[styles.modalCaja, { paddingBottom: 20 + espacioAbajo }]} keyboardShouldPersistTaps="handled">
+            <Text style={styles.modalTitulo}>💸 Saqué plata del cajón</Text>
+            <Text style={styles.modalFecha}>Se descuenta de lo que la app espera encontrar al cerrar, para que el faltante no sea mentira.</Text>
+
+            <Text style={styles.etiqueta}>¿Para qué fue?</Text>
+            <View style={styles.metodosCorregir}>
+              {MOTIVOS_SALIDA.map(m => (
+                <TouchableOpacity
+                  key={m}
+                  onPress={() => setSalidaMotivo(m)}
+                  style={[styles.metodoChip, salidaMotivo === m && styles.metodoChipActivo]}
+                >
+                  <Text style={[styles.metodoChipTexto, salidaMotivo === m && styles.metodoChipTextoActivo]}>{m}</Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+
+            <TextInput
+              style={styles.input}
+              placeholder="S/ 0.00"
+              placeholderTextColor={colors.placeholder}
+              keyboardType="decimal-pad"
+              value={salidaMonto}
+              onChangeText={setSalidaMonto}
+            />
+
+            <View style={styles.filaBotones}>
+              <TouchableOpacity style={styles.botonGhost} onPress={cerrarVistaCaja}>
+                <Text style={styles.botonGhostTexto}>Cancelar</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.botonPrimario, !(parseFloat(salidaMonto) > 0) && styles.botonDeshabilitado]}
+                onPress={confirmarSalida}
+                disabled={!(parseFloat(salidaMonto) > 0) || guardandoCaja}
+              >
+                <Text style={styles.botonPrimarioTexto}>{guardandoCaja ? 'Anotando...' : 'Anotar salida'}</Text>
+              </TouchableOpacity>
+            </View>
+          </ScrollView>
+        </View>
+      </Modal>
 
       <Modal visible={vistaCaja === 'apertura'} transparent animationType="slide" onRequestClose={cerrarVistaCaja}>
         <View style={[styles.modalFondo, { paddingBottom: alturaTeclado }]}>
@@ -294,6 +365,12 @@ export default function HistorialScreen() {
                   <View key={m.metodo} style={styles.filaTotalLinea}>
                     <Text style={styles.itemNombre}>{ICONO[m.metodo] || ''} {m.metodo} ({m.cantidad})</Text>
                     <Text style={styles.itemSubtotal}>{fmt(m.monto)}</Text>
+                  </View>
+                ))}
+                {(caja.salidas || []).map(s => (
+                  <View key={s.id} style={styles.filaTotalLinea}>
+                    <Text style={styles.itemNombre}>💸 Salida · {s.motivo} ({hora(s.fecha)})</Text>
+                    <Text style={styles.textoSalida}>−{fmt(s.monto)}</Text>
                   </View>
                 ))}
                 {caja.fiado_otorgado > 0 && (
@@ -520,6 +597,7 @@ const styles = StyleSheet.create({
 
   avisoAnulada: { color: colors.danger, fontWeight: '700', fontSize: 13, marginTop: 6 },
   filaAnulada: { opacity: 0.55, borderStyle: 'dashed' },
+  textoSalida: { color: colors.danger, fontWeight: '700', fontSize: 13 },
   etiquetaAnulada: { color: colors.danger, fontWeight: '700', fontSize: 11, marginTop: 3 },
   totalAnulado: { textDecorationLine: 'line-through', color: colors.textMuted },
   metodosCorregir: { flexDirection: 'row', gap: 8, marginTop: 4 },

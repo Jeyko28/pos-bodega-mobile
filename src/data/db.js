@@ -140,6 +140,17 @@ CREATE TABLE IF NOT EXISTS sesiones_caja (
 );
 CREATE INDEX IF NOT EXISTS idx_sesion_caja_abierta ON sesiones_caja(cerrada_en);
 
+CREATE TABLE IF NOT EXISTS salidas_caja (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  sesion_id INTEGER NOT NULL,
+  monto REAL NOT NULL,
+  motivo TEXT NOT NULL,
+  detalle TEXT,
+  usuario_id INTEGER,
+  fecha TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_salidas_sesion ON salidas_caja(sesion_id);
+
 CREATE TABLE IF NOT EXISTS config (
   clave TEXT PRIMARY KEY,
   valor TEXT
@@ -739,14 +750,28 @@ async function anularPagoFiado(pagoId) {
   return { success: true }
 }
 
-function getHistorialVentas() {
+// Acotado por fecha a propósito: sin filtro esto traía a memoria todas las
+// ventas y todos sus detalles cada vez que se abría la pestaña. A cien ventas
+// diarias eso son decenas de miles de filas en unos meses, en un teléfono de
+// gama media. El historial siempre se mira por período, así que se consulta por
+// período.
+function getHistorialVentas(desdeISO = null) {
+  const rango = desdeISO ? 'WHERE v.fecha >= ?' : ''
+  const args = desdeISO ? [desdeISO] : []
+
   const ventas = sql.getAllSync(`
     SELECT v.*, u.nombre AS nombre_usuario, COALESCE(c.nombre, v.comprador_nombre) AS nombre_cliente
     FROM ventas v
     LEFT JOIN usuarios u ON u.id = v.usuario_id
     LEFT JOIN clientes c ON c.id = v.cliente_id
-  `)
-  const detalles = sql.getAllSync('SELECT * FROM detalle_ventas')
+    ${rango}
+  `, ...args)
+
+  const detalles = ventas.length
+    ? sql.getAllSync(
+        `SELECT * FROM detalle_ventas WHERE venta_id IN (${ventas.map(() => '?').join(',')})`,
+        ...ventas.map(v => v.id))
+    : []
 
   const conItems = ventas.map(v => ({
     ...v,
@@ -764,7 +789,8 @@ function getHistorialVentas() {
     LEFT JOIN fiado f ON f.id = p.fiado_id
     LEFT JOIN clientes c ON c.id = f.cliente_id
     LEFT JOIN usuarios u ON u.id = p.usuario_id
-  `).map(p => ({
+    WHERE p.anulado = 0 ${desdeISO ? 'AND p.fecha >= ?' : ''}
+  `, ...args).map(p => ({
     id: `pago-${p.id}`,
     tipo: 'pago_fiado',
     total: p.monto,
@@ -872,6 +898,8 @@ function getEstadoCaja() {
   const desde = sesion ? sesion.abierta_en : inicioHoy.toISOString()
   const resumen = resumenCobros(desde)
   const fondo = sesion ? sesion.fondo_inicial : 0
+  const salidas = sesion ? getSalidasCaja(sesion.id) : []
+  const salido = redondear(salidas.reduce((s, x) => s + x.monto, 0))
 
   return {
     ...resumen,
@@ -879,7 +907,9 @@ function getEstadoCaja() {
     abierta: !!sesion,
     desde,
     fondo_inicial: fondo,
-    esperado_en_cajon: redondear(fondo + resumen.efectivo),
+    salidas,
+    total_salidas: salido,
+    esperado_en_cajon: redondear(fondo + resumen.efectivo - salido),
   }
 }
 
@@ -894,6 +924,34 @@ async function abrirCaja({ fondoInicial = 0, usuarioId = null }) {
   return { success: true, id: r.lastInsertRowId }
 }
 
+// Del cajón también sale plata todo el día: se le paga al distribuidor que
+// llegó, se manda a comprar pan, el dueño saca para él. Sin registrarlo el
+// cierre acusa un faltante que no existe, y a la segunda vez que eso pasa nadie
+// vuelve a cerrar caja.
+export const MOTIVOS_SALIDA = ['Proveedor', 'Gasto', 'Retiro']
+
+async function registrarSalidaCaja({ monto, motivo = 'Gasto', detalle = null, usuarioId = null }) {
+  const sesion = getSesionAbierta()
+  if (!sesion) return { success: false, error: 'Abre la caja antes de anotar una salida.' }
+
+  const m = parseFloat(monto)
+  if (isNaN(m) || m <= 0) return { success: false, error: 'Escribe cuánto sacaste del cajón.' }
+
+  sql.runSync(
+    'INSERT INTO salidas_caja (sesion_id, monto, motivo, detalle, usuario_id, fecha) VALUES (?, ?, ?, ?, ?, ?)',
+    sesion.id, redondear(m), motivo, detalle?.trim() || null, usuarioId, new Date().toISOString())
+  return { success: true }
+}
+
+function getSalidasCaja(sesionId) {
+  return sql.getAllSync('SELECT * FROM salidas_caja WHERE sesion_id = ? ORDER BY id DESC', sesionId)
+}
+
+function totalSalidas(sesionId) {
+  const r = sql.getFirstSync('SELECT COALESCE(SUM(monto), 0) AS total FROM salidas_caja WHERE sesion_id = ?', sesionId)
+  return redondear(r?.total || 0)
+}
+
 // El cierre guarda las dos cifras — la que la app calculó y la que el dueño
 // contó — y la diferencia entre ambas. Guardar solo el descuadre escondería de
 // dónde salió, que es justo lo que se revisa cuando no cuadra.
@@ -906,7 +964,7 @@ async function cerrarCaja({ efectivoContado, nota = null, usuarioId = null }) {
 
   const cerradaEn = new Date().toISOString()
   const resumen = resumenCobros(sesion.abierta_en, cerradaEn)
-  const esperado = redondear(sesion.fondo_inicial + resumen.efectivo)
+  const esperado = redondear(sesion.fondo_inicial + resumen.efectivo - totalSalidas(sesion.id))
   const diferencia = redondear(contado - esperado)
 
   sql.runSync(
@@ -1039,4 +1097,5 @@ export default {
   realizarVenta, getHistorialVentas, getDetalleVenta, getResumenHoy, getResumenPeriodo,
   anularVenta, cambiarMetodoPago,
   getEstadoCaja, getSesionAbierta, abrirCaja, cerrarCaja, getSesionesCaja,
+  registrarSalidaCaja, getSalidasCaja,
 }
