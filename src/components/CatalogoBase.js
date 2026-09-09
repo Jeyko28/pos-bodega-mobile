@@ -7,6 +7,7 @@ import { CATALOGO_BASE } from '../data/catalogoBase'
 import { iconoCategoria } from '../data/categorias'
 import { chips } from '../theme/chips'
 import { colors } from '../theme/colors'
+import { normalizar } from '../utils/texto'
 
 // Se renderiza como contenido de un <Modal> que ya está abierto (nunca abre uno
 // propio): dos <Modal> nativos a la vez rompen en iOS.
@@ -22,8 +23,7 @@ export default function CatalogoBase({ onCerrar, onAgregados }) {
   // Los que ya están cargados se muestran marcados y bloqueados, para que el
   // dueño vea de un vistazo qué le falta en vez de topárselos al guardar.
   const yaExisten = useMemo(() => {
-    const nombres = db.getProductos().map(p => p.nombre.toLowerCase())
-    return new Set(nombres)
+    return new Set(db.getProductos().map(p => normalizar(p.nombre)))
   }, [])
 
   const categorias = useMemo(() => [...new Set(CATALOGO_BASE.map(p => p.categoria))], [])
@@ -36,7 +36,7 @@ export default function CatalogoBase({ onCerrar, onAgregados }) {
 
   // Solo se pueden marcar los que no están ya cargados; los demás no son
   // candidatos y contarlos haría que "marcar todos" nunca se sintiera completo.
-  const marcables = visibles.filter(p => !yaExisten.has(p.nombre.toLowerCase()))
+  const marcables = visibles.filter(p => !yaExisten.has(normalizar(p.nombre)))
   const todosMarcados = marcables.length > 0 && marcables.every(p => seleccion[p.nombre])
 
   function alternarTodos() {
@@ -97,7 +97,7 @@ export default function CatalogoBase({ onCerrar, onAgregados }) {
 
       <ScrollView style={styles.lista} keyboardShouldPersistTaps="handled">
         {visibles.map(p => {
-          const existe = yaExisten.has(p.nombre.toLowerCase())
+          const existe = yaExisten.has(normalizar(p.nombre))
           const marcado = !!seleccion[p.nombre]
           return (
             <TouchableOpacity key={p.nombre} style={[styles.fila, existe && styles.filaExistente]}

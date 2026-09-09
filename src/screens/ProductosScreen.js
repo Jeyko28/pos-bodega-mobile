@@ -5,9 +5,11 @@ import db from '../data/db'
 import { colors } from '../theme/colors'
 import BarcodeScannerModal from '../components/BarcodeScannerModal'
 import CatalogoBase from '../components/CatalogoBase'
+import IngresoMercaderia from '../components/IngresoMercaderia'
 import { sugerirEmoji } from '../utils/emoji'
 import { CATEGORIAS_BASE } from '../data/categorias'
 import { chips } from '../theme/chips'
+import { coincide } from '../utils/texto'
 
 const fmt = (n) => `S/ ${Number(n).toFixed(2)}`
 
@@ -28,6 +30,7 @@ export default function ProductosScreen() {
   const [form, setForm] = useState({ nombre: '', precio: '', stock: '', categoria: '', tipo_venta: 'unidad', unidad: 'kg', codigo: '' })
   const [scanner, setScanner] = useState(false)
   const [catalogo, setCatalogo] = useState(false)
+  const [ingreso, setIngreso] = useState(false)
   const [categoriasCustom, setCategoriasCustom] = useState([])
   const [agregandoCategoria, setAgregandoCategoria] = useState(false)
   const [nuevaCategoriaTexto, setNuevaCategoriaTexto] = useState('')
@@ -95,7 +98,7 @@ export default function ProductosScreen() {
   const totalBajoStock = productos.filter(enAlerta).length
 
   const filtrados = productos
-    .filter(p => !busqueda.trim() || p.nombre.toLowerCase().includes(busqueda.toLowerCase()))
+    .filter(p => coincide(p.nombre, busqueda))
     .filter(p => !categoriaFiltro || p.categoria === categoriaFiltro)
     .filter(p => !soloBajoStock || enAlerta(p))
 
@@ -105,6 +108,13 @@ export default function ProductosScreen() {
         <TextInput style={styles.buscador} placeholder="🔍 Buscar..." placeholderTextColor={colors.placeholder} value={busqueda} onChangeText={setBusqueda} />
         <TouchableOpacity style={styles.botonNuevo} onPress={abrirNuevo}><Text style={styles.botonNuevoTexto}>+ Producto</Text></TouchableOpacity>
       </View>
+
+      {productos.length > 0 && (
+        <TouchableOpacity style={styles.botonIngreso} onPress={() => setIngreso(true)}>
+          <Text style={styles.botonIngresoTexto}>📦  Ingresar mercadería</Text>
+          <Text style={styles.botonIngresoAyuda}>Llegó el proveedor · suma al stock</Text>
+        </TouchableOpacity>
+      )}
 
       <View style={chips.fila}>
         <ScrollView horizontal showsHorizontalScrollIndicator={false} style={chips.scroll} contentContainerStyle={chips.contenido}>
@@ -167,6 +177,10 @@ export default function ProductosScreen() {
 
       <Modal visible={catalogo} animationType="slide" onRequestClose={() => setCatalogo(false)}>
         <CatalogoBase onCerrar={() => setCatalogo(false)} onAgregados={() => setProductos(db.getProductos())} />
+      </Modal>
+
+      <Modal visible={ingreso} animationType="slide" onRequestClose={() => setIngreso(false)}>
+        <IngresoMercaderia onCerrar={() => setIngreso(false)} onGuardado={() => setProductos(db.getProductos())} />
       </Modal>
 
       <Modal visible={modal} transparent={!scanner} animationType="slide" onRequestClose={() => (scanner ? setScanner(false) : setModal(false))}>
@@ -258,6 +272,9 @@ const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: colors.bg },
   header: { flexDirection: 'row', gap: 8, padding: 12 },
   buscador: { flex: 1, backgroundColor: colors.input, borderWidth: 1, borderColor: colors.border, borderRadius: 10, padding: 12, color: colors.text },
+  botonIngreso: { marginHorizontal: 12, marginBottom: 4, paddingVertical: 12, paddingHorizontal: 14, borderRadius: 10, borderWidth: 1, borderColor: colors.borderStrong, backgroundColor: colors.card, alignItems: 'center' },
+  botonIngresoTexto: { color: colors.text, fontWeight: '700', fontSize: 14 },
+  botonIngresoAyuda: { color: colors.textMuted, fontSize: 11, marginTop: 2 },
   botonNuevo: { backgroundColor: colors.primary, borderRadius: 10, paddingHorizontal: 16, justifyContent: 'center' },
   botonNuevoTexto: { color: colors.primaryText, fontWeight: '700' },
   fila: { flexDirection: 'row', alignItems: 'center', backgroundColor: colors.card, borderRadius: 10, padding: 12, marginBottom: 8, borderWidth: 1, borderColor: colors.border },

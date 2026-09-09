@@ -5,6 +5,7 @@ import db from '../data/db'
 import { useSesion } from '../context/SesionContext'
 import { colors } from '../theme/colors'
 import { CATEGORIAS_BASE, iconoCategoria } from '../data/categorias'
+import { coincide, esElMismo } from '../utils/texto'
 import BarcodeScannerModal from '../components/BarcodeScannerModal'
 import { chips } from '../theme/chips'
 import * as Haptics from 'expo-haptics'
@@ -15,6 +16,8 @@ const METODOS = ['Efectivo', 'Yape', 'Plin', 'Fiado']
 // En una bodega el cliente pide por plata ("dame dos soles de azúcar") mucho más
 // seguido que por peso, así que el modo por monto es el que va por defecto.
 const MONTOS_RAPIDOS = [1, 2, 5, 10]
+// Billetes y monedas con los que realmente paga la gente en una bodega.
+const BILLETES = [2, 5, 10, 20, 50, 100, 200]
 const PESOS_RAPIDOS = [0.25, 0.5, 1, 2]
 
 // El número de "Cliente N" se calcula según los carritos abiertos en ese
@@ -58,6 +61,8 @@ export default function POSScreen() {
   const [mensajeScanner, setMensajeScanner] = useState(null)
   const [codigoHuerfano, setCodigoHuerfano] = useState(null)
   const [busquedaHuerfano, setBusquedaHuerfano] = useState('')
+  const [nuevoProducto, setNuevoProducto] = useState({ nombre: '', precio: '' })
+  const [creandoProducto, setCreandoProducto] = useState(false)
 
   const [aviso, setAviso] = useState(null)
   const avisoOpacidad = useRef(new Animated.Value(0)).current
@@ -100,15 +105,20 @@ export default function POSScreen() {
     return parseFloat(p.stock) - enCarrito
   }
 
+  // Avisa, pero no impide vender. En una bodega la verdad es el estante, no la
+  // base de datos: si el dueño no alcanzó a registrar lo que llegó del
+  // proveedor, bloquear la venta le hace perder plata por un dato que la app
+  // ya sabe que está incompleto. El stock puede quedar negativo a propósito —
+  // es la señal de que hay que ingresar mercadería.
   function avisarSinStock(p) {
     Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning)
     mostrarAviso(parseFloat(p.stock) <= 0
-      ? `${p.nombre} está sin stock`
-      : `Solo quedan ${p.stock} de ${p.nombre}`)
+      ? `⚠️ ${p.nombre} figura sin stock — ingresa mercadería`
+      : `⚠️ Vendiendo más de lo registrado de ${p.nombre}`)
   }
 
   function agregarProducto(p) {
-    if (disponibleDe(p) <= 0) { avisarSinStock(p); return }
+    if (disponibleDe(p) <= 0) avisarSinStock(p)
     if (p.tipo_venta === 'granel') { abrirGranel(p); return }
     const items = carritoActivo.items
     const i = items.findIndex(it => it.id === p.id)
@@ -148,6 +158,33 @@ export default function POSScreen() {
     setMensajeScanner({ ok: true, texto: `✓ ${p.nombre} — ${fmt(p.precio)}` })
   }
 
+  const puedeCrearProducto = nuevoProducto.nombre.trim().length >= 2 && parseFloat(nuevoProducto.precio) > 0
+
+  function cerrarCodigoHuerfano() {
+    setCodigoHuerfano(null)
+    setBusquedaHuerfano('')
+    setNuevoProducto({ nombre: '', precio: '' })
+  }
+
+  async function crearProductoConCodigo() {
+    setCreandoProducto(true)
+    // Entra en stock 0 y categoría "Otros": lo urgente es cobrar. El dueño
+    // completa esos datos después, desde Productos, sin la cola encima.
+    const creado = await db.addProducto({
+      nombre: nuevoProducto.nombre.trim(),
+      precio: nuevoProducto.precio,
+      stock: 0,
+      codigo: codigoHuerfano,
+      categoria: 'Otros',
+      tipo_venta: 'unidad',
+    })
+    setCreandoProducto(false)
+    await cargar()
+    cerrarCodigoHuerfano()
+    agregarProducto(creado)
+    mostrarAviso(`✓ ${creado.nombre} creado y agregado`)
+  }
+
   async function engancharCodigo(producto) {
     const r = await db.asignarCodigo(producto.id, codigoHuerfano)
     if (!r.success) {
@@ -167,7 +204,7 @@ export default function POSScreen() {
   function cambiarCantidad(productoId, delta) {
     if (delta > 0) {
       const producto = productos.find(p => p.id === productoId)
-      if (producto && disponibleDe(producto) <= 0) { avisarSinStock(producto); return }
+      if (producto && disponibleDe(producto) <= 0) avisarSinStock(producto)
     }
     const nuevos = carritoActivo.items
       .map(it => it.id === productoId ? { ...it, cantidad: it.cantidad + delta, subtotal: (it.cantidad + delta) * it.precio } : it)
@@ -230,13 +267,12 @@ export default function POSScreen() {
     const calculo = calcularGranel()
     if (!calculo) return
 
-    // A diferencia del stepper de unidades, acá el cajero escribe la cantidad,
-    // así que puede pasarse del stock de una sola vez.
+    // Avisa si se pasa del stock registrado, pero deja vender igual: el peso
+    // real lo tiene la balanza, no la app.
     const stock = parseFloat(productoGranel.stock)
     if (calculo.peso > stock) {
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning)
-      Alert.alert('No alcanza el stock', `De ${productoGranel.nombre} solo quedan ${stock} ${productoGranel.unidad || 'kg'}.`)
-      return
+      mostrarAviso(`⚠️ De ${productoGranel.nombre} solo figuran ${stock} ${productoGranel.unidad || 'kg'}`)
     }
     const items = carritoActivo.items
     const i = items.findIndex(it => it.id === productoGranel.id)
@@ -269,8 +305,7 @@ export default function POSScreen() {
   const total = carritoActivo.items.reduce((s, i) => s + i.subtotal, 0)
   const productosFiltrados = productos
     .filter(p => {
-      const q = busqueda.trim().toLowerCase()
-      return !q || p.nombre.toLowerCase().includes(q) || String(p.codigo || '').includes(q)
+      return coincide(p.nombre, busqueda) || String(p.codigo || '').includes(busqueda.trim())
     })
     .filter(p => !categoriaFiltro || p.categoria === categoriaFiltro)
 
@@ -286,14 +321,13 @@ export default function POSScreen() {
       .map(id => ({ id, icon: '📦' })),
   ]
 
-  const clientesFiltrados = busquedaCliente.trim()
-    ? clientes.filter(c => c.nombre.toLowerCase().includes(busquedaCliente.trim().toLowerCase()))
-    : clientes
+  const clientesFiltrados = clientes.filter(c => coincide(c.nombre, busquedaCliente))
 
-  // Solo se ofrece crear si lo escrito no coincide exactamente con alguien que
-  // ya existe, para no terminar con dos "Marco Suárez" en la lista de fiados.
+  // Solo se ofrece crear si lo escrito no coincide con alguien que ya existe,
+  // para no terminar con dos "Marco Suárez" en la lista de fiados. La
+  // comparación ignora tildes: "Nuñez" y "Núñez" son la misma persona.
   const puedeCrearCliente = busquedaCliente.trim().length >= 2 &&
-    !clientes.some(c => c.nombre.toLowerCase() === busquedaCliente.trim().toLowerCase())
+    !clientes.some(c => esElMismo(c.nombre, busquedaCliente))
 
   async function crearClienteYFiar() {
     setCreandoCliente(true)
@@ -313,10 +347,21 @@ export default function POSScreen() {
     setModalPago(true)
   }
 
+  // Antes el botón simplemente no hacía nada y el cajero tocaba tres veces
+  // pensando que el teléfono se colgó. Ahora dice qué falta.
+  function motivoNoCobrar() {
+    if (!metodoPago) return 'Elige cómo te van a pagar'
+    if (metodoPago === 'Fiado' && !clienteFiadoId) return 'Elige o crea el cliente al que le fías'
+    if (metodoPago === 'Efectivo') {
+      const recibido = parseFloat(montoRecibido)
+      if (isNaN(recibido)) return 'Escribe con cuánto te pagan (o toca "Justo")'
+      if (recibido < total) return `Falta ${fmt(total - recibido)} para cubrir la venta`
+    }
+    return null
+  }
+
   async function confirmarCobro() {
-    if (!metodoPago) return
-    if (metodoPago === 'Fiado' && !clienteFiadoId) return
-    if (metodoPago === 'Efectivo' && (isNaN(parseFloat(montoRecibido)) || parseFloat(montoRecibido) < total)) return
+    if (motivoNoCobrar()) return
 
     setCobrando(true)
     try {
@@ -407,7 +452,7 @@ export default function POSScreen() {
             <View style={{ flex: 1 }}>
               <Text style={styles.nombreProducto}>{item.nombre}{item.tipo_venta === 'granel' ? ` ⚖️` : ''}</Text>
               {parseFloat(item.stock) <= 0 ? (
-                <Text style={styles.sinStockTexto}>Sin stock — repón para poder venderlo</Text>
+                <Text style={styles.sinStockTexto}>Figura sin stock — puedes venderlo igual</Text>
               ) : (
                 <Text style={styles.stockProducto}>Stock: {item.stock} {item.tipo_venta === 'granel' ? (item.unidad || 'kg') : ''}</Text>
               )}
@@ -471,7 +516,7 @@ export default function POSScreen() {
             <ScrollView style={{ maxHeight: 260 }} keyboardShouldPersistTaps="handled">
               {productos
                 .filter(p => !p.codigo)
-                .filter(p => !busquedaHuerfano.trim() || p.nombre.toLowerCase().includes(busquedaHuerfano.toLowerCase()))
+                .filter(p => coincide(p.nombre, busquedaHuerfano))
                 .slice(0, 30)
                 .map(p => (
                   <TouchableOpacity key={p.id} style={styles.filaHuerfano} onPress={() => engancharCodigo(p)}>
@@ -481,11 +526,44 @@ export default function POSScreen() {
                   </TouchableOpacity>
                 ))}
               {productos.filter(p => !p.codigo).length === 0 && (
-                <Text style={styles.vacio}>Todos tus productos ya tienen código. Registra este producto desde la pestaña Productos.</Text>
+                <Text style={styles.vacio}>Todos tus productos ya tienen código.</Text>
               )}
             </ScrollView>
 
-            <TouchableOpacity style={[styles.botonGhost, { flex: 0 }]} onPress={() => { setCodigoHuerfano(null); setBusquedaHuerfano('') }}>
+            {/* Producto que nunca estuvo registrado (la marca nueva que trajo el
+                distribuidor): se crea acá mismo con lo mínimo — nombre y precio —
+                en vez de abandonar la venta para ir a la pestaña Productos. */}
+            <View style={styles.nuevoProductoCaja}>
+              <Text style={styles.nuevoProductoTitulo}>¿Es un producto nuevo?</Text>
+              <View style={styles.nuevoProductoFila}>
+                <TextInput
+                  style={[styles.input, { flex: 2 }]}
+                  placeholder="Nombre"
+                  placeholderTextColor={colors.placeholder}
+                  value={nuevoProducto.nombre}
+                  onChangeText={v => setNuevoProducto(n => ({ ...n, nombre: v }))}
+                />
+                <TextInput
+                  style={[styles.input, { flex: 1 }]}
+                  placeholder="S/"
+                  placeholderTextColor={colors.placeholder}
+                  keyboardType="decimal-pad"
+                  value={nuevoProducto.precio}
+                  onChangeText={v => setNuevoProducto(n => ({ ...n, precio: v }))}
+                />
+              </View>
+              <TouchableOpacity
+                style={[styles.botonPrimario, !puedeCrearProducto && styles.botonDeshabilitado]}
+                onPress={crearProductoConCodigo}
+                disabled={!puedeCrearProducto || creandoProducto}
+              >
+                <Text style={styles.botonPrimarioTexto}>
+                  {creandoProducto ? 'Creando...' : 'Crear y vender'}
+                </Text>
+              </TouchableOpacity>
+            </View>
+
+            <TouchableOpacity style={[styles.botonGhost, { flex: 0 }]} onPress={cerrarCodigoHuerfano}>
               <Text style={styles.botonGhostTexto}>Ahora no</Text>
             </TouchableOpacity>
           </View>
@@ -518,8 +596,23 @@ export default function POSScreen() {
 
             {metodoPago === 'Efectivo' && (
               <View>
-                <TextInput style={styles.input} placeholder="Monto recibido" placeholderTextColor={colors.placeholder} keyboardType="decimal-pad"
-                  value={montoRecibido} onChangeText={setMontoRecibido} autoFocus />
+                {/* La venta más común del día es con el importe justo o con un
+                    billete redondo. Estos atajos le quitan el teclado a ese caso
+                    — sin ellos la tentación es marcar Yape para ir más rápido, y
+                    ahí el cierre de caja deja de cuadrar. */}
+                <View style={styles.atajosPago}>
+                  <TouchableOpacity style={[styles.atajoPago, styles.atajoJusto]} onPress={() => setMontoRecibido(String(total.toFixed(2)))}>
+                    <Text style={styles.atajoJustoTexto}>Justo</Text>
+                  </TouchableOpacity>
+                  {BILLETES.filter(b => b > total).slice(0, 4).map(b => (
+                    <TouchableOpacity key={b} style={styles.atajoPago} onPress={() => setMontoRecibido(String(b))}>
+                      <Text style={styles.atajoPagoTexto}>{b}</Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+
+                <TextInput style={styles.input} placeholder="O escribe con cuánto te pagan" placeholderTextColor={colors.placeholder} keyboardType="decimal-pad"
+                  value={montoRecibido} onChangeText={setMontoRecibido} />
                 {montoRecibido !== '' && !isNaN(parseFloat(montoRecibido)) && (
                   parseFloat(montoRecibido) >= total ? (
                     <Text style={styles.vueltoTexto}>Vuelto: {fmt(parseFloat(montoRecibido) - total)}</Text>
@@ -565,11 +658,19 @@ export default function POSScreen() {
               </>
             )}
 
+            {motivoNoCobrar() && (
+              <Text style={styles.motivoBloqueo}>{motivoNoCobrar()}</Text>
+            )}
+
             <View style={styles.filaBotones}>
               <TouchableOpacity style={styles.botonGhost} onPress={() => setModalPago(false)}>
                 <Text style={styles.botonGhostTexto}>Cancelar</Text>
               </TouchableOpacity>
-              <TouchableOpacity style={styles.botonPrimario} onPress={confirmarCobro} disabled={cobrando}>
+              <TouchableOpacity
+                style={[styles.botonPrimario, motivoNoCobrar() && styles.botonDeshabilitado]}
+                onPress={confirmarCobro}
+                disabled={cobrando || !!motivoNoCobrar()}
+              >
                 {cobrando ? <ActivityIndicator color={colors.primaryText} /> : <Text style={styles.botonPrimarioTexto}>Confirmar</Text>}
               </TouchableOpacity>
             </View>
@@ -649,6 +750,15 @@ const styles = StyleSheet.create({
   filaProducto: { flexDirection: 'row', alignItems: 'center', backgroundColor: colors.card, borderRadius: 10, padding: 12, marginBottom: 8, borderWidth: 1, borderColor: colors.border },
   iconoProducto: { fontSize: 20, lineHeight: 26, marginRight: 10 },
   filaSinStock: { opacity: 0.5, borderStyle: 'dashed' },
+  nuevoProductoCaja: { marginTop: 10, paddingTop: 12, borderTopWidth: 1, borderTopColor: colors.border, gap: 8 },
+  nuevoProductoTitulo: { color: colors.textMuted, fontSize: 12, fontWeight: '700' },
+  nuevoProductoFila: { flexDirection: 'row', gap: 8 },
+  atajosPago: { flexDirection: 'row', gap: 8, marginBottom: 4 },
+  atajoPago: { flex: 1, paddingVertical: 12, borderRadius: 10, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.input, alignItems: 'center' },
+  atajoPagoTexto: { color: colors.text, fontWeight: '700', fontSize: 15 },
+  atajoJusto: { backgroundColor: colors.accentBg, borderColor: colors.primary },
+  atajoJustoTexto: { color: colors.accent, fontWeight: '800', fontSize: 14 },
+  motivoBloqueo: { color: colors.warning, fontSize: 13, fontWeight: '600', textAlign: 'center', marginTop: 4 },
   crearCliente: { paddingVertical: 12, paddingHorizontal: 14, borderRadius: 10, borderWidth: 1, borderStyle: 'dashed', borderColor: colors.primary, backgroundColor: colors.accentBg, alignItems: 'center' },
   crearClienteTexto: { color: colors.accent, fontWeight: '700', fontSize: 13 },
   sinStockTexto: { color: colors.danger, fontSize: 12, marginTop: 2, fontWeight: '600' },

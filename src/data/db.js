@@ -1,6 +1,7 @@
 import * as SQLite from 'expo-sqlite'
 import * as Crypto from 'expo-crypto'
 import AsyncStorage from '@react-native-async-storage/async-storage'
+import { normalizar as normalizarTexto } from '../utils/texto'
 
 // Antes todos los datos vivían en un solo JSON de AsyncStorage que se reescribía
 // entero en cada venta. Con miles de ventas eso se vuelve lento y arriesgado, así
@@ -335,13 +336,17 @@ async function deleteProducto(id) {
 // duplicar los que ya cargó.
 async function addProductosLote(productos) {
   const creadoEn = new Date().toISOString()
+  const productosActuales = sql.getAllSync('SELECT nombre FROM productos')
   let agregados = 0
   let omitidos = 0
 
   sql.withTransactionSync(() => {
     productos.forEach(p => {
-      const existe = sql.getFirstSync('SELECT id FROM productos WHERE LOWER(nombre) = LOWER(?)', p.nombre)
+      // Se compara sin tildes: "Plátano" y "platano" son el mismo producto y no
+      // deben convivir duplicados en el catálogo.
+      const existe = productosActuales.some(a => normalizarTexto(a.nombre) === normalizarTexto(p.nombre))
       if (existe) { omitidos++; return }
+      productosActuales.push({ nombre: p.nombre })
       sql.runSync(
         'INSERT INTO productos (nombre, precio, stock, codigo, categoria, tipo_venta, unidad, creado_en) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
         p.nombre, parseFloat(p.precio), parseFloat(p.stock) || 0, null,
@@ -351,6 +356,23 @@ async function addProductosLote(productos) {
   })
 
   return { agregados, omitidos }
+}
+
+// Suma al stock en vez de reemplazarlo: cuando llega el proveedor, el dueño
+// sabe cuánto LLEGÓ, no cuánto queda en total. Obligarlo a hacer esa suma de
+// cabeza, producto por producto, es la razón por la que el inventario termina
+// mintiendo y la app dejando de servir.
+async function ingresarMercaderia(entradas) {
+  let actualizados = 0
+  sql.withTransactionSync(() => {
+    entradas.forEach(({ id, cantidad }) => {
+      const suma = parseFloat(cantidad)
+      if (!suma || suma <= 0) return
+      sql.runSync('UPDATE productos SET stock = stock + ? WHERE id = ?', suma, id)
+      actualizados++
+    })
+  })
+  return { actualizados }
 }
 
 // Engancha un código de barras real a un producto que se cargó sin él (por
@@ -398,9 +420,14 @@ async function addCliente({ nombre, telefono, referencia, dni_ruc }) {
   return { id: r.lastInsertRowId, nombre, telefono: telefono || null, referencia: referencia || null, dni_ruc: dni_ruc || null, creado_en: creadoEn }
 }
 
+// El filtro va en JS y no en SQL a propósito: el LIKE de SQLite no ignora
+// tildes, así que buscar "nunez" nunca encontraría a "Núñez". La lista de
+// clientes de una bodega es chica, el costo de filtrar en memoria es nulo.
 function buscarCliente(query) {
-  const q = `%${query.toLowerCase()}%`
-  return sql.getAllSync(`${SQL_CLIENTES} WHERE LOWER(c.nombre) LIKE ? OR c.telefono LIKE ?`, q, q)
+  const clientes = sql.getAllSync(SQL_CLIENTES)
+  const q = normalizarTexto(query)
+  if (!q) return clientes
+  return clientes.filter(c => normalizarTexto(c.nombre).includes(q) || (c.telefono || '').includes(query.trim()))
 }
 
 // ─── FIADO ──────────────────────────────────────────────────────────
@@ -732,7 +759,7 @@ export default {
   isSetupCompletado, completarSetup,
   login, getUsuarios, addUsuario, cambiarPassword, setUsuarioActivo,
   getProductos, addProducto, updateProducto, deleteProducto, getProductosBajoStock,
-  addProductosLote, asignarCodigo,
+  addProductosLote, asignarCodigo, ingresarMercaderia,
   getCategoriasCustom, addCategoriaCustom,
   getConfig, updateConfig, getBackupJSON, restaurarBackup, validarBackup,
   getClientes, addCliente, buscarCliente,
