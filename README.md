@@ -66,6 +66,8 @@ Todo pasa por `src/data/db.js`. Ninguna pantalla habla con SQLite directamente.
 
 Las tablas son: `productos`, `ventas`, `detalle_ventas`, `clientes`, `fiado`, `pagos_fiado`, `usuarios`, `categorias_custom`, `ingresos` y `detalle_ingresos` (mercadería que llega del proveedor), `sesiones_caja` y `salidas_caja` (turnos de caja y plata que sale del cajón) y `config` (clave/valor).
 
+El costo de compra vive en `productos.costo` (opcional) y se **congela** en `detalle_ventas.costo_unitario` al vender.
+
 Las columnas nuevas se agregan en `agregarColumnasFaltantes()`: `CREATE TABLE IF NOT EXISTS` no toca una tabla que ya existe, así que para las bodegas que ya venían usando la app hay que sumarlas con `ALTER TABLE`, comprobando antes con `PRAGMA table_info` porque SQLite no tiene "ADD COLUMN IF NOT EXISTS".
 
 ### Migración desde el formato viejo
@@ -120,6 +122,14 @@ Cada una costó tiempo de depuración o fue una decisión de producto deliberada
 
   **Vender nunca exige tener la caja abierta.** Si el dueño no la abrió, el cuadre se cae al día de hoy y muestra los números igual, solo que sin fondo contra el cual comparar. Bloquear la venta por un trámite administrativo es exactamente el error que ya se corrigió con el stock: avisar sí, prohibir no.
 
+- **La ganancia es aproximada y dice sobre cuánto está calculada.** "Ingresos hoy: S/ 640" no responde la pregunta que se hace el dueño — la mayor parte de esa plata es del proveedor. El costo se pide donde ya tiene la factura delante (al ingresar mercadería) o en la ficha del producto, y es **opcional**: exigirlo para poder vender sería peor que no tener el dato. Como no todos los productos lo tendrán, mostrar un número pelado sería mentir, así que la tarjeta dice cuánto de lo vendido quedó fuera del cálculo.
+
+  El costo se **congela** en cada venta (`detalle_ventas.costo_unitario`) en vez de leerlo del producto al calcular: si mañana el proveedor sube el precio, la ganancia de las ventas de hoy no puede cambiar sola.
+
+- **Un monto suelto se cobra sin dar de alta el producto.** Pan, hielo, una bolsa: cosas que se venden a diario y que nadie va a cargar al catálogo. Entran al carrito como "Varios" con un id no numérico, y por eso `realizarVenta` guarda el detalle con `producto_id` nulo y no le descuenta stock a nadie. Sin esta salida, cada una de esas ventas se quedaba fuera del sistema y arrastraba el cuadre de caja con ella.
+
+- **El fiado se abona al total del cliente, no deuda por deuda.** La app reparte el abono de la más vieja a la más nueva y deja un pago por cada deuda tocada, así el historial sigue cuadrando. Repartirlo a mano, fila por fila y con el casero esperando en el mostrador, era más lento que el cuaderno que la app vino a reemplazar.
+
 - **Todo lo registrado se puede corregir, y nada se borra.** En el mostrador uno se equivoca a diario: marcó 2 y era 1, el cliente devolvió el producto, cobró en efectivo y tocó Yape. Sin arreglo posible el stock se desvía solo y el cierre acusa descuadres inventados, así que se anula la venta (devuelve stock, borra el fiado que generó, deja de contar en todos los totales) o se corrige el método desde el detalle. La venta anulada queda listada y tachada: lo que se revisa después es justamente qué se anuló. Un fiado que ya tiene abonos cobrados no se puede anular de una — primero se anulan los abonos, porque esos sí movieron plata real.
 
 - **El respaldo automático viene prendido.** `respaldo_frecuencia` arranca en `'diario'` desde `getConfig()`. Antes no tenía valor por defecto, `tocaRespaldar()` devolvía `false` y una bodega podía trabajar meses sin una sola copia salvo que alguien entrara a Ajustes a activarla. Un respaldo que hay que ir a pedir no protege a nadie.
@@ -140,7 +150,7 @@ Cada una costó tiempo de depuración o fue una decisión de producto deliberada
 
 ## Estado
 
-**Fase 1 (actual): app autónoma.** Setup, login por usuario, productos con escaneo de código de barras, catálogo base de bodega peruana, ingreso de mercadería con deshacer, venta con carritos simultáneos y escaneo continuo, venta a granel por peso o por monto, fiado con abonos parciales y cobranza por WhatsApp, apertura y cierre de caja con salidas de efectivo y descuadre, anulación y corrección de ventas, historial con filtros, alertas de stock, ticket en PDF y respaldo local, en carpeta pública y en Google Drive con restauración.
+**Fase 1 (actual): app autónoma.** Setup, login por usuario, productos con escaneo de código de barras, catálogo base de bodega peruana, ingreso de mercadería con deshacer, venta con carritos simultáneos y escaneo continuo, venta a granel por peso o por monto, fiado con abonos parciales y cobranza por WhatsApp, apertura y cierre de caja con salidas de efectivo y descuadre, anulación y corrección de ventas, cobro de montos sueltos, costo de compra y ganancia aproximada, historial con filtros, alertas de stock, ticket en PDF y respaldo local, en carpeta pública y en Google Drive con restauración.
 
 Lo que el respaldo **no** incluye: `ingresos`, `detalle_ingresos` ni `sesiones_caja`. Son historial operativo del teléfono, no datos del negocio que deban viajar a otro equipo — pero significa que al cambiar de celular esos historiales no se recuperan.
 

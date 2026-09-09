@@ -24,6 +24,7 @@ export default function HistorialScreen() {
   const { alturaTeclado, espacioAbajo } = usePieDeHoja()
   const [ventas, setVentas] = useState([])
   const [resumen, setResumen] = useState({ total_ventas: 0, ingresos: 0 })
+  const [ganancia, setGanancia] = useState(null)
   const [periodo, setPeriodo] = useState('hoy')
   const [metodoFiltro, setMetodoFiltro] = useState(null)
   const [ventaSel, setVentaSel] = useState(null)
@@ -54,6 +55,7 @@ export default function HistorialScreen() {
     if (p === 'hoy') setResumen(db.getResumenHoy())
     else if (p === 'semana') setResumen(db.getResumenPeriodo(7))
     else setResumen(db.getResumenPeriodo(30))
+    setGanancia(db.getGanancia(desdeDelPeriodo(p)))
   }
 
   function cerrarVistaCaja() {
@@ -206,6 +208,26 @@ export default function HistorialScreen() {
           <Text style={styles.resumenLabel}>Ingresos {etiquetaPeriodo}</Text>
         </View>
       </View>
+
+      {/* Lo que ingresó no es lo que se ganó: la mayor parte es del proveedor.
+          Esta es la única cifra que la app puede dar y el cuaderno no — pero
+          solo vale si los costos están cargados, así que se dice cuánto de lo
+          vendido quedó fuera del cálculo en vez de fingir un número exacto. */}
+      {ganancia && ganancia.vendido_total > 0 && (
+        <View style={styles.tarjetaGanancia}>
+          <View style={styles.filaGanancia}>
+            <Text style={styles.gananciaLabel}>Ganancia aprox. {etiquetaPeriodo}</Text>
+            <Text style={styles.gananciaValor}>{fmt(ganancia.ganancia)}</Text>
+          </View>
+          {ganancia.cobertura < 0.999 && (
+            <Text style={styles.gananciaAviso}>
+              {ganancia.vendido_con_costo === 0
+                ? 'Ninguno de los productos vendidos tiene su costo cargado todavía. Ponlo al ingresar mercadería o en la ficha del producto.'
+                : `Calculada sobre ${fmt(ganancia.vendido_con_costo)} de ${fmt(ganancia.vendido_total)} vendidos: al resto le falta cargarle el costo.`}
+            </Text>
+          )}
+        </View>
+      )}
 
       <View style={[styles.tarjetaCaja, caja?.abierta && styles.tarjetaCajaAbierta]}>
         {caja?.abierta ? (
@@ -614,6 +636,11 @@ const styles = StyleSheet.create({
   resumen: { flexDirection: 'row', gap: 10, padding: 16 },
   resumenBox: { flex: 1, backgroundColor: colors.card, borderRadius: 12, padding: 14, alignItems: 'center', borderWidth: 1, borderColor: colors.border },
   resumenValor: { color: colors.accent, fontWeight: '900', fontSize: 20 },
+  tarjetaGanancia: { marginHorizontal: 16, marginBottom: 8, padding: 14, borderRadius: 12, backgroundColor: colors.card, borderWidth: 1, borderColor: colors.border },
+  filaGanancia: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
+  gananciaLabel: { color: colors.textMuted, fontSize: 13, fontWeight: '600' },
+  gananciaValor: { color: colors.accent, fontWeight: '800', fontSize: 22 },
+  gananciaAviso: { color: colors.textMuted, fontSize: 11, lineHeight: 16, marginTop: 6 },
   resumenLabel: { color: colors.textMuted, fontSize: 12, marginTop: 4 },
   fila: { flexDirection: 'row', alignItems: 'center', backgroundColor: colors.card, borderRadius: 10, padding: 12, marginBottom: 8, borderWidth: 1, borderColor: colors.border },
   venta: { color: colors.text, fontWeight: '600', fontSize: 13 },

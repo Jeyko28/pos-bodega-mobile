@@ -79,6 +79,7 @@ export default function IngresoMercaderia({ onCerrar, onGuardado }) {
         nombre: producto.nombre,
         categoria: producto.categoria,
         stockActual: parseFloat(producto.stock),
+        costoActual: producto.costo ?? null,
         unidad: producto.tipo_venta === 'granel' ? (producto.unidad || 'kg') : 'uds',
         cantidad: cantidadInicial,
       }, ...es]
@@ -89,6 +90,10 @@ export default function IngresoMercaderia({ onCerrar, onGuardado }) {
 
   function cambiarCantidad(id, valor) {
     setEntradas(es => es.map(e => e.id === id ? { ...e, cantidad: valor } : e))
+  }
+
+  function cambiarCosto(id, valor) {
+    setEntradas(es => es.map(e => e.id === id ? { ...e, costo: valor } : e))
   }
 
   function quitar(id) {
@@ -334,6 +339,16 @@ export default function IngresoMercaderia({ onCerrar, onGuardado }) {
                       {(e.stockActual + (parseFloat(e.cantidad) || 0)).toFixed(e.unidad === 'uds' ? 0 : 2)} {e.unidad}
                     </Text>
                   </Text>
+                  {/* Este es el único momento del día en que el dueño tiene la
+                      factura del proveedor delante. En blanco no pisa nada. */}
+                  <TextInput
+                    style={styles.costoInput}
+                    keyboardType="decimal-pad"
+                    placeholder={e.costoActual != null ? `Te cuesta S/ ${e.costoActual}` : 'Te cuesta (opcional)'}
+                    placeholderTextColor={colors.placeholder}
+                    value={e.costo || ''}
+                    onChangeText={v => cambiarCosto(e.id, v)}
+                  />
                 </View>
                 <TextInput
                   style={styles.cantidadInput}
@@ -418,6 +433,7 @@ const styles = StyleSheet.create({
   nombre: { color: colors.text, fontWeight: '600', fontSize: 14 },
   meta: { color: colors.textMuted, fontSize: 12, marginTop: 2 },
   metaResultado: { color: colors.accent, fontWeight: '700' },
+  costoInput: { marginTop: 6, backgroundColor: colors.input, borderWidth: 1, borderColor: colors.border, borderRadius: 8, paddingVertical: 6, paddingHorizontal: 10, color: colors.text, fontSize: 12 },
   cantidadInput: { width: 64, backgroundColor: colors.input, borderWidth: 1, borderColor: colors.borderStrong, borderRadius: 8, paddingVertical: 10, textAlign: 'center', color: colors.text, fontSize: 15, fontWeight: '700' },
   quitar: { paddingLeft: 2 },
   vacio: { color: colors.textMuted, textAlign: 'center', padding: 24, fontSize: 13 },

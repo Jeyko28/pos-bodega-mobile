@@ -35,6 +35,7 @@ CREATE TABLE IF NOT EXISTS productos (
   categoria TEXT,
   tipo_venta TEXT NOT NULL DEFAULT 'unidad',
   unidad TEXT NOT NULL DEFAULT 'unidad',
+  costo REAL,
   creado_en TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_productos_codigo ON productos(codigo);
@@ -77,7 +78,8 @@ CREATE TABLE IF NOT EXISTS detalle_ventas (
   cantidad REAL NOT NULL,
   subtotal REAL NOT NULL,
   tipo_venta TEXT NOT NULL DEFAULT 'unidad',
-  unidad TEXT NOT NULL DEFAULT 'unidad'
+  unidad TEXT NOT NULL DEFAULT 'unidad',
+  costo_unitario REAL
 );
 CREATE INDEX IF NOT EXISTS idx_detalle_venta ON detalle_ventas(venta_id);
 
@@ -200,6 +202,8 @@ const COLUMNAS_NUEVAS = [
   ['ventas', 'anulada_en', 'TEXT'],
   ['fiado', 'venta_id', 'INTEGER'],
   ['pagos_fiado', 'anulado', 'INTEGER NOT NULL DEFAULT 0'],
+  ['productos', 'costo', 'REAL'],
+  ['detalle_ventas', 'costo_unitario', 'REAL'],
 ]
 
 function agregarColumnasFaltantes() {
@@ -379,18 +383,23 @@ function getProductos() {
   return sql.getAllSync('SELECT * FROM productos').sort((a, b) => a.nombre.localeCompare(b.nombre))
 }
 
-async function addProducto({ nombre, precio, stock, codigo, categoria, tipo_venta, unidad }) {
+// El costo es opcional: una bodega no lo sabe de todos sus productos, y exigirlo
+// para poder vender sería peor que no tener el dato. Sin costo el producto
+// simplemente no suma a la ganancia, y la pantalla lo dice.
+const costoONulo = (v) => (v === '' || v === null || v === undefined || isNaN(parseFloat(v)) ? null : parseFloat(v))
+
+async function addProducto({ nombre, precio, stock, codigo, categoria, tipo_venta, unidad, costo }) {
   const creadoEn = new Date().toISOString()
   const r = sql.runSync(
-    'INSERT INTO productos (nombre, precio, stock, codigo, categoria, tipo_venta, unidad, creado_en) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
-    nombre, parseFloat(precio), parseFloat(stock), codigo || null, categoria || 'General', tipo_venta || 'unidad', unidad || 'unidad', creadoEn)
+    'INSERT INTO productos (nombre, precio, stock, codigo, categoria, tipo_venta, unidad, costo, creado_en) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
+    nombre, parseFloat(precio), parseFloat(stock), codigo || null, categoria || 'General', tipo_venta || 'unidad', unidad || 'unidad', costoONulo(costo), creadoEn)
   return sql.getFirstSync('SELECT * FROM productos WHERE id = ?', r.lastInsertRowId)
 }
 
-async function updateProducto({ id, nombre, precio, stock, codigo, categoria, tipo_venta, unidad }) {
+async function updateProducto({ id, nombre, precio, stock, codigo, categoria, tipo_venta, unidad, costo }) {
   sql.runSync(
-    'UPDATE productos SET nombre = ?, precio = ?, stock = ?, codigo = ?, categoria = ?, tipo_venta = ?, unidad = ? WHERE id = ?',
-    nombre, parseFloat(precio), parseFloat(stock), codigo || null, categoria, tipo_venta || 'unidad', unidad || 'unidad', id)
+    'UPDATE productos SET nombre = ?, precio = ?, stock = ?, codigo = ?, categoria = ?, tipo_venta = ?, unidad = ?, costo = ? WHERE id = ?',
+    nombre, parseFloat(precio), parseFloat(stock), codigo || null, categoria, tipo_venta || 'unidad', unidad || 'unidad', costoONulo(costo), id)
   return sql.getFirstSync('SELECT * FROM productos WHERE id = ?', id)
 }
 
@@ -438,10 +447,15 @@ async function ingresarMercaderia(entradas, usuarioId = null) {
     const r = sql.runSync('INSERT INTO ingresos (fecha, usuario_id) VALUES (?, ?)', new Date().toISOString(), usuarioId)
     ingresoId = r.lastInsertRowId
 
-    entradas.forEach(({ id, nombre, cantidad }) => {
+    entradas.forEach(({ id, nombre, cantidad, costo }) => {
       const suma = parseFloat(cantidad)
       if (!suma || suma <= 0) return
       sql.runSync('UPDATE productos SET stock = stock + ? WHERE id = ?', suma, id)
+      // Cuando llega el proveedor es el único momento en que el dueño tiene la
+      // factura delante y sabe a cuánto le costó. Es opcional: si lo deja en
+      // blanco queda el costo anterior, no se pisa con nada.
+      const nuevoCosto = costoONulo(costo)
+      if (nuevoCosto !== null) sql.runSync('UPDATE productos SET costo = ? WHERE id = ?', nuevoCosto, id)
       // Se guarda cuánto sumó cada producto: sin ese dato no habría forma de
       // revertir un ingreso mal tipeado (500 en vez de 50) sin obligar al dueño
       // a calcular la resta a mano, que es justo lo que esta pantalla evita.
@@ -689,9 +703,14 @@ async function realizarVenta(items, montoRecibido, metodoPago = 'Efectivo', desc
       // se registra en la venta para que la caja cuadre, pero no apunta a
       // ninguna fila de `productos` ni descuenta stock de nada.
       const productoId = Number.isInteger(item.id) ? item.id : null
+      // El costo se congela acá: si mañana el proveedor sube el precio, la
+      // ganancia de las ventas de hoy no puede cambiar sola.
+      const costo = productoId
+        ? sql.getFirstSync('SELECT costo FROM productos WHERE id = ?', productoId)?.costo ?? null
+        : null
       sql.runSync(
-        'INSERT INTO detalle_ventas (venta_id, producto_id, nombre_producto, precio_unitario, cantidad, subtotal, tipo_venta, unidad) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
-        ventaId, productoId, item.nombre, item.precio, item.cantidad, item.subtotal, item.tipo_venta || 'unidad', item.unidad || 'unidad')
+        'INSERT INTO detalle_ventas (venta_id, producto_id, nombre_producto, precio_unitario, cantidad, subtotal, tipo_venta, unidad, costo_unitario) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
+        ventaId, productoId, item.nombre, item.precio, item.cantidad, item.subtotal, item.tipo_venta || 'unidad', item.unidad || 'unidad', costo)
       if (productoId) {
         sql.runSync('UPDATE productos SET stock = MAX(0, stock - ?) WHERE id = ?', parseFloat(item.cantidad), productoId)
       }
@@ -853,6 +872,34 @@ function resumenEntre(desdeISO, hastaISO) {
     `SELECT COALESCE(SUM(monto), 0) AS abonos FROM pagos_fiado WHERE ${abonosVigentes}`, ...args)
 
   return { total_ventas: v.total_ventas, ingresos: v.ingresos + p.abonos }
+}
+
+// La ganancia solo puede salir de los productos que tienen costo cargado, así
+// que además del monto se devuelve cuánto de lo vendido quedó fuera del
+// cálculo. Un número sin ese contexto sería mentira: diría "ganaste S/ 40"
+// cuando la mitad de lo vendido ni siquiera se pudo evaluar.
+function getGanancia(desdeISO, hastaISO = null) {
+  const rango = hastaISO ? 'v.fecha >= ? AND v.fecha < ?' : 'v.fecha >= ?'
+  const args = hastaISO ? [desdeISO, hastaISO] : [desdeISO]
+
+  const r = sql.getFirstSync(`
+    SELECT
+      COALESCE(SUM(CASE WHEN d.costo_unitario IS NOT NULL THEN d.subtotal - d.costo_unitario * d.cantidad END), 0) AS ganancia,
+      COALESCE(SUM(CASE WHEN d.costo_unitario IS NOT NULL THEN d.subtotal END), 0) AS vendido_con_costo,
+      COALESCE(SUM(d.subtotal), 0) AS vendido_total
+    FROM detalle_ventas d
+    JOIN ventas v ON v.id = d.venta_id
+    WHERE ${rango} AND v.anulada = 0 AND v.es_fiado = 0
+  `, ...args)
+
+  return {
+    ganancia: redondear(r.ganancia),
+    vendido_con_costo: redondear(r.vendido_con_costo),
+    vendido_total: redondear(r.vendido_total),
+    // Sin nada vendido no falta nada por costear: evita mostrar "0% costeado"
+    // en una bodega que todavía no vendió hoy.
+    cobertura: r.vendido_total > 0 ? r.vendido_con_costo / r.vendido_total : 1,
+  }
 }
 
 function getResumenHoy() {
@@ -1124,7 +1171,7 @@ export default {
   getConfig, updateConfig, getBackupJSON, restaurarBackup, validarBackup,
   getClientes, addCliente, updateCliente, buscarCliente,
   getFiadoCliente, addFiado, abonarACliente, getResumenFiado, getFiadosAntiguos, anularPagoFiado,
-  realizarVenta, getHistorialVentas, getDetalleVenta, getResumenHoy, getResumenPeriodo,
+  realizarVenta, getHistorialVentas, getDetalleVenta, getResumenHoy, getResumenPeriodo, getGanancia,
   anularVenta, cambiarMetodoPago,
   getEstadoCaja, getSesionAbierta, abrirCaja, cerrarCaja, getSesionesCaja,
   registrarSalidaCaja, getSalidasCaja,

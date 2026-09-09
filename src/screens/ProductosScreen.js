@@ -29,7 +29,7 @@ export default function ProductosScreen() {
   const [categoriaFiltro, setCategoriaFiltro] = useState(null)
   const [modal, setModal] = useState(false)
   const [editando, setEditando] = useState(null)
-  const [form, setForm] = useState({ nombre: '', precio: '', stock: '', categoria: '', tipo_venta: 'unidad', unidad: 'kg', codigo: '' })
+  const [form, setForm] = useState({ nombre: '', precio: '', stock: '', categoria: '', tipo_venta: 'unidad', unidad: 'kg', codigo: '', costo: '' })
   const [scanner, setScanner] = useState(false)
   const [catalogo, setCatalogo] = useState(false)
   const [ingreso, setIngreso] = useState(false)
@@ -60,13 +60,13 @@ export default function ProductosScreen() {
 
   function abrirNuevo() {
     setEditando(null)
-    setForm({ nombre: '', precio: '', stock: '', categoria: '', tipo_venta: 'unidad', unidad: 'kg', codigo: '' })
+    setForm({ nombre: '', precio: '', stock: '', categoria: '', tipo_venta: 'unidad', unidad: 'kg', codigo: '', costo: '' })
     setModal(true)
   }
 
   function abrirEditar(p) {
     setEditando(p)
-    setForm({ nombre: p.nombre, precio: String(p.precio), stock: String(p.stock), categoria: p.categoria || '', tipo_venta: p.tipo_venta, unidad: p.unidad || 'kg', codigo: p.codigo || '' })
+    setForm({ nombre: p.nombre, precio: String(p.precio), stock: String(p.stock), categoria: p.categoria || '', tipo_venta: p.tipo_venta, unidad: p.unidad || 'kg', codigo: p.codigo || '', costo: p.costo == null ? '' : String(p.costo) })
     setModal(true)
   }
 
@@ -194,7 +194,12 @@ export default function ProductosScreen() {
           <ScrollView style={styles.modalScrollLimite} contentContainerStyle={[styles.modalCaja, { paddingBottom: 20 + espacioAbajo }]} keyboardShouldPersistTaps="handled">
             <Text style={styles.modalTitulo}>{editando ? 'Editar producto' : 'Nuevo producto'}</Text>
             <TextInput style={styles.input} placeholder="Nombre" placeholderTextColor={colors.placeholder} value={form.nombre} onChangeText={v => setForm(f => ({ ...f, nombre: v }))} />
-            <TextInput style={styles.input} placeholder="Precio" placeholderTextColor={colors.placeholder} keyboardType="decimal-pad" value={form.precio} onChangeText={v => setForm(f => ({ ...f, precio: v }))} />
+            <View style={styles.filaCodigo}>
+              <TextInput style={[styles.input, { flex: 1 }]} placeholder="Precio de venta" placeholderTextColor={colors.placeholder} keyboardType="decimal-pad" value={form.precio} onChangeText={v => setForm(f => ({ ...f, precio: v }))} />
+              {/* Opcional: sin costo el producto no suma a la ganancia del día,
+                  pero se puede vender igual. Exigirlo sería peor que no tenerlo. */}
+              <TextInput style={[styles.input, { flex: 1 }]} placeholder="Te cuesta (opc.)" placeholderTextColor={colors.placeholder} keyboardType="decimal-pad" value={form.costo} onChangeText={v => setForm(f => ({ ...f, costo: v }))} />
+            </View>
             <TextInput style={styles.input} placeholder="Stock" placeholderTextColor={colors.placeholder} keyboardType="decimal-pad" value={form.stock} onChangeText={v => setForm(f => ({ ...f, stock: v }))} />
             <View style={styles.filaCodigo}>
               <TextInput style={[styles.input, { flex: 1 }]} placeholder="Código de barras (opcional)" placeholderTextColor={colors.placeholder}
