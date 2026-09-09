@@ -4,11 +4,20 @@ import { useFocusEffect } from '@react-navigation/native'
 import db from '../data/db'
 import { colors } from '../theme/colors'
 import BarcodeScannerModal from '../components/BarcodeScannerModal'
+import CatalogoBase from '../components/CatalogoBase'
 import { sugerirEmoji } from '../utils/emoji'
 import { CATEGORIAS_BASE } from '../data/categorias'
 import { chips } from '../theme/chips'
 
 const fmt = (n) => `S/ ${Number(n).toFixed(2)}`
+
+// El granel no siempre es peso: en bodega el plátano o el huevo se venden
+// sueltos y contados. La unidad define cómo se pide y cómo se cobra.
+const UNIDADES_GRANEL = [
+  { id: 'kg', label: 'Kilo', singular: 'kilo' },
+  { id: 'unidad', label: 'Unidad', singular: 'unidad' },
+  { id: 'litro', label: 'Litro', singular: 'litro' },
+]
 
 export default function ProductosScreen() {
   const [productos, setProductos] = useState([])
@@ -16,8 +25,9 @@ export default function ProductosScreen() {
   const [categoriaFiltro, setCategoriaFiltro] = useState(null)
   const [modal, setModal] = useState(false)
   const [editando, setEditando] = useState(null)
-  const [form, setForm] = useState({ nombre: '', precio: '', stock: '', categoria: '', tipo_venta: 'unidad', codigo: '' })
+  const [form, setForm] = useState({ nombre: '', precio: '', stock: '', categoria: '', tipo_venta: 'unidad', unidad: 'kg', codigo: '' })
   const [scanner, setScanner] = useState(false)
+  const [catalogo, setCatalogo] = useState(false)
   const [categoriasCustom, setCategoriasCustom] = useState([])
   const [agregandoCategoria, setAgregandoCategoria] = useState(false)
   const [nuevaCategoriaTexto, setNuevaCategoriaTexto] = useState('')
@@ -45,13 +55,13 @@ export default function ProductosScreen() {
 
   function abrirNuevo() {
     setEditando(null)
-    setForm({ nombre: '', precio: '', stock: '', categoria: '', tipo_venta: 'unidad', codigo: '' })
+    setForm({ nombre: '', precio: '', stock: '', categoria: '', tipo_venta: 'unidad', unidad: 'kg', codigo: '' })
     setModal(true)
   }
 
   function abrirEditar(p) {
     setEditando(p)
-    setForm({ nombre: p.nombre, precio: String(p.precio), stock: String(p.stock), categoria: p.categoria || '', tipo_venta: p.tipo_venta, codigo: p.codigo || '' })
+    setForm({ nombre: p.nombre, precio: String(p.precio), stock: String(p.stock), categoria: p.categoria || '', tipo_venta: p.tipo_venta, unidad: p.unidad || 'kg', codigo: p.codigo || '' })
     setModal(true)
   }
 
@@ -64,7 +74,7 @@ export default function ProductosScreen() {
 
   async function guardar() {
     if (!formValido) return
-    const datos = { ...form, unidad: form.tipo_venta === 'granel' ? 'kg' : 'unidad' }
+    const datos = { ...form, unidad: form.tipo_venta === 'granel' ? (form.unidad || 'kg') : 'unidad' }
     if (editando) {
       await db.updateProducto({ id: editando.id, ...datos })
     } else {
@@ -137,8 +147,27 @@ export default function ProductosScreen() {
             <Text style={styles.precio}>{fmt(item.precio)}</Text>
           </TouchableOpacity>
         )}
-        ListEmptyComponent={<Text style={styles.vacio}>No hay productos todavía. Toca "+ Producto" para agregar el primero.</Text>}
+        ListEmptyComponent={
+          <View style={styles.vacioCaja}>
+            <Text style={styles.vacio}>Todavía no tienes productos cargados.</Text>
+            <TouchableOpacity style={styles.botonCatalogo} onPress={() => setCatalogo(true)}>
+              <Text style={styles.botonCatalogoTexto}>📋  Empezar con productos comunes</Text>
+            </TouchableOpacity>
+            <Text style={styles.vacioAyuda}>
+              Marca los que vendes y ajusta precios. Es mucho más rápido que escribirlos uno por uno, y siempre puedes agregar los tuyos con "+ Producto".
+            </Text>
+          </View>
+        }
+        ListFooterComponent={filtrados.length > 0 ? (
+          <TouchableOpacity style={styles.enlaceCatalogo} onPress={() => setCatalogo(true)}>
+            <Text style={styles.enlaceCatalogoTexto}>📋  Agregar productos comunes de bodega</Text>
+          </TouchableOpacity>
+        ) : null}
       />
+
+      <Modal visible={catalogo} animationType="slide" onRequestClose={() => setCatalogo(false)}>
+        <CatalogoBase onCerrar={() => setCatalogo(false)} onAgregados={() => setProductos(db.getProductos())} />
+      </Modal>
 
       <Modal visible={modal} transparent={!scanner} animationType="slide" onRequestClose={() => (scanner ? setScanner(false) : setModal(false))}>
         {scanner ? (
@@ -187,10 +216,30 @@ export default function ProductosScreen() {
             <View style={styles.tipoVentaFila}>
               {['unidad', 'granel'].map(t => (
                 <TouchableOpacity key={t} onPress={() => setForm(f => ({ ...f, tipo_venta: t }))} style={[styles.tipoVentaBoton, form.tipo_venta === t && styles.tipoVentaBotonActivo]}>
-                  <Text style={[styles.tipoVentaTexto, form.tipo_venta === t && styles.tipoVentaTextoActivo]}>{t === 'unidad' ? 'Por unidad' : 'A granel (kg)'}</Text>
+                  <Text style={[styles.tipoVentaTexto, form.tipo_venta === t && styles.tipoVentaTextoActivo]}>{t === 'unidad' ? 'Por unidad' : 'Suelto / a granel'}</Text>
                 </TouchableOpacity>
               ))}
             </View>
+
+            {form.tipo_venta === 'granel' && (
+              <>
+                <Text style={styles.etiquetaCategoria}>Se vende por</Text>
+                <View style={styles.tipoVentaFila}>
+                  {UNIDADES_GRANEL.map(u => (
+                    <TouchableOpacity key={u.id} onPress={() => setForm(f => ({ ...f, unidad: u.id }))}
+                      style={[styles.tipoVentaBoton, (form.unidad || 'kg') === u.id && styles.tipoVentaBotonActivo]}>
+                      <Text style={[styles.tipoVentaTexto, (form.unidad || 'kg') === u.id && styles.tipoVentaTextoActivo]}>{u.label}</Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+                <Text style={styles.ayudaUnidad}>
+                  El precio es por {UNIDADES_GRANEL.find(u => u.id === (form.unidad || 'kg'))?.singular}.
+                  {(form.unidad || 'kg') === 'unidad'
+                    ? ' Sirve para lo que se vende suelto y contado, como el plátano: si son 4 por S/1, pon 0.25 y el cliente podrá pedir "un sol".'
+                    : ' El cliente podrá pedir por peso o por monto ("dos soles de azúcar").'}
+                </Text>
+              </>
+            )}
             <View style={styles.filaBotones}>
               <TouchableOpacity style={styles.botonGhost} onPress={() => setModal(false)}><Text style={styles.botonGhostTexto}>Cancelar</Text></TouchableOpacity>
               <TouchableOpacity style={[styles.botonPrimario, !formValido && styles.botonDeshabilitado]} onPress={guardar} disabled={!formValido}>
@@ -220,7 +269,13 @@ const styles = StyleSheet.create({
   chipAlertaActivo: { borderWidth: 2 },
   textoAlerta: { color: colors.warning },
   precio: { color: colors.accent, fontWeight: '700', fontSize: 15 },
-  vacio: { color: colors.textMuted, textAlign: 'center', padding: 24, fontSize: 13 },
+  vacio: { color: colors.textMuted, textAlign: 'center', fontSize: 14 },
+  vacioCaja: { padding: 24, alignItems: 'center', gap: 14 },
+  vacioAyuda: { color: colors.textMuted, textAlign: 'center', fontSize: 12, lineHeight: 17 },
+  botonCatalogo: { backgroundColor: colors.primary, borderRadius: 10, paddingVertical: 14, paddingHorizontal: 20, alignSelf: 'stretch', alignItems: 'center' },
+  botonCatalogoTexto: { color: colors.primaryText, fontWeight: '700', fontSize: 14 },
+  enlaceCatalogo: { paddingVertical: 16, alignItems: 'center' },
+  enlaceCatalogoTexto: { color: colors.accent, fontWeight: '700', fontSize: 13 },
   modalFondo: { flex: 1, backgroundColor: colors.overlay, justifyContent: 'flex-end' },
   modalCaja: { backgroundColor: colors.card, borderTopLeftRadius: 20, borderTopRightRadius: 20, padding: 20, gap: 10 },
   modalScrollLimite: { flexGrow: 0, maxHeight: '85%' },
@@ -236,6 +291,7 @@ const styles = StyleSheet.create({
   botonConfirmarCategoriaTexto: { color: colors.primaryText, fontWeight: '700', fontSize: 14 },
   botonCancelarCategoria: { width: 46, height: 46, borderRadius: 10, borderWidth: 1, borderColor: colors.border, alignItems: 'center', justifyContent: 'center' },
   botonCancelarCategoriaTexto: { color: colors.textMuted, fontWeight: '700', fontSize: 16 },
+  ayudaUnidad: { color: colors.textMuted, fontSize: 11, lineHeight: 16 },
   tipoVentaFila: { flexDirection: 'row', gap: 8 },
   tipoVentaBoton: { flex: 1, padding: 12, borderRadius: 10, borderWidth: 1, borderColor: colors.border, alignItems: 'center' },
   tipoVentaBotonActivo: { backgroundColor: colors.accentBg, borderColor: colors.primary },

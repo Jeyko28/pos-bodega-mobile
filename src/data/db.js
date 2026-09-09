@@ -330,6 +330,39 @@ async function deleteProducto(id) {
   return { success: true }
 }
 
+// Alta masiva desde el catálogo base. Se salta los que ya existen por nombre
+// para que el dueño pueda volver a entrar y agregar los que le faltaban sin
+// duplicar los que ya cargó.
+async function addProductosLote(productos) {
+  const creadoEn = new Date().toISOString()
+  let agregados = 0
+  let omitidos = 0
+
+  sql.withTransactionSync(() => {
+    productos.forEach(p => {
+      const existe = sql.getFirstSync('SELECT id FROM productos WHERE LOWER(nombre) = LOWER(?)', p.nombre)
+      if (existe) { omitidos++; return }
+      sql.runSync(
+        'INSERT INTO productos (nombre, precio, stock, codigo, categoria, tipo_venta, unidad, creado_en) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+        p.nombre, parseFloat(p.precio), parseFloat(p.stock) || 0, null,
+        p.categoria || 'General', p.tipo_venta || 'unidad', p.unidad || 'unidad', creadoEn)
+      agregados++
+    })
+  })
+
+  return { agregados, omitidos }
+}
+
+// Engancha un código de barras real a un producto que se cargó sin él (por
+// ejemplo, desde el catálogo base). Es el mecanismo que hace que el catálogo se
+// complete solo con el uso, sin inventar códigos.
+async function asignarCodigo(productoId, codigo) {
+  const enUso = sql.getFirstSync('SELECT nombre FROM productos WHERE codigo = ? AND id != ?', codigo, productoId)
+  if (enUso) return { success: false, error: `Ese código ya es de "${enUso.nombre}"` }
+  sql.runSync('UPDATE productos SET codigo = ? WHERE id = ?', codigo, productoId)
+  return { success: true }
+}
+
 function getProductosBajoStock() {
   const u = getConfig().umbral_stock_bajo || 5
   return sql.getAllSync('SELECT * FROM productos WHERE stock <= ? ORDER BY stock ASC', u)
@@ -616,13 +649,92 @@ function getBackupJSON() {
   }, null, 2)
 }
 
+// Solo se restauran los datos del negocio. Lo que es propio del teléfono
+// (carpeta de respaldo elegida, lista de copias locales, marca de migración)
+// se deja intacto: pertenece a este dispositivo, no al respaldo.
+const CLAVES_CONFIG_NEGOCIO = [
+  'negocio_nombre', 'negocio_ruc', 'negocio_direccion', 'negocio_telefono',
+  'ticket_mensaje', 'umbral_stock_bajo', 'respaldo_frecuencia',
+]
+
+export function validarBackup(datos) {
+  if (!datos || typeof datos !== 'object') return { valido: false, error: 'El archivo no tiene el formato esperado.' }
+  if (!Array.isArray(datos.productos) || !Array.isArray(datos.ventas)) {
+    return { valido: false, error: 'Esto no parece un respaldo de POS Bodega.' }
+  }
+  return {
+    valido: true,
+    resumen: {
+      productos: datos.productos.length,
+      ventas: datos.ventas.length,
+      clientes: (datos.clientes || []).length,
+      fiados: (datos.fiado || []).filter(f => f.estado === 'pendiente').length,
+      negocio: datos.config?.negocio_nombre || null,
+    },
+  }
+}
+
+// Reemplaza los datos del negocio por los del respaldo. Los usuarios NO se
+// tocan a propósito: el respaldo no lleva contraseñas (no deben salir del
+// teléfono), así que restaurarlos dejaría a todos sin poder entrar. Las cuentas
+// de este dispositivo siguen siendo las válidas.
+async function restaurarBackup(datos) {
+  const { valido, error } = validarBackup(datos)
+  if (!valido) return { success: false, error }
+
+  try {
+    sql.withTransactionSync(() => {
+      ;['detalle_ventas', 'ventas', 'pagos_fiado', 'fiado', 'productos', 'clientes', 'categorias_custom']
+        .forEach(tabla => sql.runSync(`DELETE FROM ${tabla}`))
+
+      ;(datos.productos || []).forEach(p => sql.runSync(
+        'INSERT INTO productos (id, nombre, precio, stock, codigo, categoria, tipo_venta, unidad, creado_en) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
+        p.id, p.nombre, p.precio, p.stock, p.codigo ?? null, p.categoria ?? 'General', p.tipo_venta || 'unidad', p.unidad || 'unidad', p.creado_en || new Date().toISOString()))
+
+      ;(datos.clientes || []).forEach(c => sql.runSync(
+        'INSERT INTO clientes (id, nombre, telefono, referencia, dni_ruc, creado_en) VALUES (?, ?, ?, ?, ?, ?)',
+        c.id, c.nombre, c.telefono ?? null, c.referencia ?? null, c.dni_ruc ?? null, c.creado_en || new Date().toISOString()))
+
+      ;(datos.ventas || []).forEach(v => sql.runSync(
+        'INSERT INTO ventas (id, total, subtotal_bruto, descuento, tipo_descuento, monto_recibido, vuelto, metodo_pago, usuario_id, cliente_id, es_fiado, comprador_nombre, comprador_dni_ruc, fecha) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+        v.id, v.total, v.subtotal_bruto ?? v.total, v.descuento ?? 0, v.tipo_descuento ?? 'ninguno',
+        v.monto_recibido ?? 0, v.vuelto ?? 0, v.metodo_pago, v.usuario_id ?? null, v.cliente_id ?? null,
+        v.es_fiado ? 1 : 0, v.comprador_nombre ?? null, v.comprador_dni_ruc ?? null, v.fecha))
+
+      ;(datos.detalle_ventas || []).forEach(d => sql.runSync(
+        'INSERT INTO detalle_ventas (id, venta_id, producto_id, nombre_producto, precio_unitario, cantidad, subtotal, tipo_venta, unidad) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
+        d.id, d.venta_id, d.producto_id ?? null, d.nombre_producto, d.precio_unitario, d.cantidad, d.subtotal, d.tipo_venta || 'unidad', d.unidad || 'unidad'))
+
+      ;(datos.fiado || []).forEach(f => sql.runSync(
+        'INSERT INTO fiado (id, cliente_id, monto_original, saldo, concepto, usuario_id, estado, fecha) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+        f.id, f.cliente_id, f.monto_original, f.saldo, f.concepto ?? null, f.usuario_id ?? null, f.estado || 'pendiente', f.fecha))
+
+      ;(datos.pagos_fiado || []).forEach(p => sql.runSync(
+        'INSERT INTO pagos_fiado (id, fiado_id, monto, metodo_pago, usuario_id, fecha) VALUES (?, ?, ?, ?, ?, ?)',
+        p.id, p.fiado_id, p.monto, p.metodo_pago || 'Efectivo', p.usuario_id ?? null, p.fecha))
+
+      ;(datos.categorias_custom || []).forEach(c => sql.runSync(
+        'INSERT INTO categorias_custom (id, icon) VALUES (?, ?)', c.id, c.icon))
+
+      CLAVES_CONFIG_NEGOCIO.forEach(clave => {
+        if (datos.config?.[clave] !== undefined) escribirConfig(clave, datos.config[clave])
+      })
+    })
+  } catch (e) {
+    return { success: false, error: e?.message || String(e) }
+  }
+
+  return { success: true }
+}
+
 export default {
   initDB,
   isSetupCompletado, completarSetup,
   login, getUsuarios, addUsuario, cambiarPassword, setUsuarioActivo,
   getProductos, addProducto, updateProducto, deleteProducto, getProductosBajoStock,
+  addProductosLote, asignarCodigo,
   getCategoriasCustom, addCategoriaCustom,
-  getConfig, updateConfig, getBackupJSON,
+  getConfig, updateConfig, getBackupJSON, restaurarBackup, validarBackup,
   getClientes, addCliente, buscarCliente,
   getFiadoCliente, addFiado, pagarFiado, getResumenFiado, getFiadosAntiguos,
   realizarVenta, getHistorialVentas, getDetalleVenta, getResumenHoy, getResumenPeriodo, getCierreCaja,

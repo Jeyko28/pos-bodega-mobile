@@ -46,6 +46,8 @@ export default function POSScreen() {
   const [montoRecibido, setMontoRecibido] = useState('')
   const [clientes, setClientes] = useState([])
   const [clienteFiadoId, setClienteFiadoId] = useState(null)
+  const [busquedaCliente, setBusquedaCliente] = useState('')
+  const [creandoCliente, setCreandoCliente] = useState(false)
   const [cobrando, setCobrando] = useState(false)
   const [productoGranel, setProductoGranel] = useState(null)
   const [entradaGranel, setEntradaGranel] = useState('')
@@ -54,6 +56,8 @@ export default function POSScreen() {
   const [categoriasCustom, setCategoriasCustom] = useState([])
   const [scanner, setScanner] = useState(false)
   const [mensajeScanner, setMensajeScanner] = useState(null)
+  const [codigoHuerfano, setCodigoHuerfano] = useState(null)
+  const [busquedaHuerfano, setBusquedaHuerfano] = useState('')
 
   const [aviso, setAviso] = useState(null)
   const avisoOpacidad = useRef(new Animated.Value(0)).current
@@ -88,7 +92,23 @@ export default function POSScreen() {
     setCarritos(prev => prev.map(c => c.id === carritoActivo.id ? { ...c, items: nuevosItems } : c))
   }
 
+  // Lo que queda realmente disponible: el stock menos lo que ya está reservado
+  // en este carrito. Sin restar el carrito se podrían agregar 5 unidades de un
+  // producto con stock 3, y la venta dejaría el stock en negativo.
+  function disponibleDe(p) {
+    const enCarrito = carritoActivo.items.find(it => it.id === p.id)?.cantidad || 0
+    return parseFloat(p.stock) - enCarrito
+  }
+
+  function avisarSinStock(p) {
+    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning)
+    mostrarAviso(parseFloat(p.stock) <= 0
+      ? `${p.nombre} está sin stock`
+      : `Solo quedan ${p.stock} de ${p.nombre}`)
+  }
+
   function agregarProducto(p) {
+    if (disponibleDe(p) <= 0) { avisarSinStock(p); return }
     if (p.tipo_venta === 'granel') { abrirGranel(p); return }
     const items = carritoActivo.items
     const i = items.findIndex(it => it.id === p.id)
@@ -107,8 +127,12 @@ export default function POSScreen() {
     // La vibración importa más que el mensaje: al escanear, el cajero mira el
     // producto y no la pantalla.
     if (!p) {
-      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error)
-      setMensajeScanner({ ok: false, texto: `Código no registrado: ${buscado}` })
+      // Un código desconocido no es un error: es la forma normal de completar el
+      // catálogo. Se cierra la cámara y se ofrece engancharlo a un producto que
+      // ya existe (típico de los que entraron sin código desde el catálogo base).
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning)
+      setScanner(false)
+      setTimeout(() => setCodigoHuerfano(buscado), 350)
       return
     }
     if (p.tipo_venta === 'granel') {
@@ -124,7 +148,27 @@ export default function POSScreen() {
     setMensajeScanner({ ok: true, texto: `✓ ${p.nombre} — ${fmt(p.precio)}` })
   }
 
+  async function engancharCodigo(producto) {
+    const r = await db.asignarCodigo(producto.id, codigoHuerfano)
+    if (!r.success) {
+      Alert.alert('No se pudo', r.error)
+      return
+    }
+    await cargar()
+    setCodigoHuerfano(null)
+    setBusquedaHuerfano('')
+    // Se agrega al carrito en el mismo gesto: el cajero escaneó porque quería
+    // venderlo, no solo para catalogarlo.
+    if (producto.tipo_venta === 'granel') abrirGranel(producto)
+    else agregarProducto(producto)
+    mostrarAviso(`✓ Código guardado en ${producto.nombre}`)
+  }
+
   function cambiarCantidad(productoId, delta) {
+    if (delta > 0) {
+      const producto = productos.find(p => p.id === productoId)
+      if (producto && disponibleDe(producto) <= 0) { avisarSinStock(producto); return }
+    }
     const nuevos = carritoActivo.items
       .map(it => it.id === productoId ? { ...it, cantidad: it.cantidad + delta, subtotal: (it.cantidad + delta) * it.precio } : it)
       .filter(it => it.cantidad > 0)
@@ -160,17 +204,40 @@ export default function POSScreen() {
     const valor = parseFloat(entradaGranel)
     const precio = productoGranel?.precio || 0
     if (isNaN(valor) || valor <= 0 || precio <= 0) return null
+
+    // Un plátano o un huevo no se parten: cuando el granel se cuenta por
+    // unidades, la cantidad va en enteros y el cobro se ajusta a lo que
+    // realmente se entrega (S/1 en plátanos de S/0.30 son 3, no 3.33).
+    const esContable = (productoGranel?.unidad || 'kg') === 'unidad'
+
     if (modoGranel === 'monto') {
-      // El cliente paga exactamente lo que pidió ("dos soles de azúcar"), así que
-      // el subtotal es el monto tal cual y el peso es lo que se deriva.
+      if (esContable) {
+        const unidades = Math.floor(valor / precio)
+        if (unidades <= 0) return null
+        return { peso: unidades, subtotal: parseFloat((unidades * precio).toFixed(2)) }
+      }
+      // Por peso el cliente paga exactamente lo que pidió ("dos soles de
+      // azúcar"): el subtotal es el monto tal cual y el peso es lo que sale.
       return { peso: parseFloat((valor / precio).toFixed(3)), subtotal: parseFloat(valor.toFixed(2)) }
     }
-    return { peso: valor, subtotal: parseFloat((valor * precio).toFixed(2)) }
+
+    const cantidad = esContable ? Math.round(valor) : valor
+    if (cantidad <= 0) return null
+    return { peso: cantidad, subtotal: parseFloat((cantidad * precio).toFixed(2)) }
   }
 
   function confirmarGranel() {
     const calculo = calcularGranel()
     if (!calculo) return
+
+    // A diferencia del stepper de unidades, acá el cajero escribe la cantidad,
+    // así que puede pasarse del stock de una sola vez.
+    const stock = parseFloat(productoGranel.stock)
+    if (calculo.peso > stock) {
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning)
+      Alert.alert('No alcanza el stock', `De ${productoGranel.nombre} solo quedan ${stock} ${productoGranel.unidad || 'kg'}.`)
+      return
+    }
     const items = carritoActivo.items
     const i = items.findIndex(it => it.id === productoGranel.id)
     let nuevos
@@ -219,11 +286,30 @@ export default function POSScreen() {
       .map(id => ({ id, icon: '📦' })),
   ]
 
+  const clientesFiltrados = busquedaCliente.trim()
+    ? clientes.filter(c => c.nombre.toLowerCase().includes(busquedaCliente.trim().toLowerCase()))
+    : clientes
+
+  // Solo se ofrece crear si lo escrito no coincide exactamente con alguien que
+  // ya existe, para no terminar con dos "Marco Suárez" en la lista de fiados.
+  const puedeCrearCliente = busquedaCliente.trim().length >= 2 &&
+    !clientes.some(c => c.nombre.toLowerCase() === busquedaCliente.trim().toLowerCase())
+
+  async function crearClienteYFiar() {
+    setCreandoCliente(true)
+    const nuevo = await db.addCliente({ nombre: busquedaCliente.trim() })
+    setCreandoCliente(false)
+    setClientes(db.getClientes())
+    setClienteFiadoId(nuevo.id)
+    setBusquedaCliente('')
+  }
+
   function abrirPago() {
     if (!carritoActivo.items.length) return
     setMetodoPago(null)
     setMontoRecibido('')
     setClienteFiadoId(null)
+    setBusquedaCliente('')
     setModalPago(true)
   }
 
@@ -313,11 +399,18 @@ export default function POSScreen() {
         keyExtractor={p => String(p.id)}
         style={styles.listaProductos}
         renderItem={({ item }) => (
-          <TouchableOpacity style={styles.filaProducto} onPress={() => agregarProducto(item)}>
+          <TouchableOpacity
+            style={[styles.filaProducto, parseFloat(item.stock) <= 0 && styles.filaSinStock]}
+            onPress={() => agregarProducto(item)}
+          >
             <Text style={styles.iconoProducto}>{iconoCategoria(item.categoria, categoriasCustom)}</Text>
             <View style={{ flex: 1 }}>
               <Text style={styles.nombreProducto}>{item.nombre}{item.tipo_venta === 'granel' ? ` ⚖️` : ''}</Text>
-              <Text style={styles.stockProducto}>Stock: {item.stock} {item.tipo_venta === 'granel' ? (item.unidad || 'kg') : ''}</Text>
+              {parseFloat(item.stock) <= 0 ? (
+                <Text style={styles.sinStockTexto}>Sin stock — repón para poder venderlo</Text>
+              ) : (
+                <Text style={styles.stockProducto}>Stock: {item.stock} {item.tipo_venta === 'granel' ? (item.unidad || 'kg') : ''}</Text>
+              )}
             </View>
             <Text style={styles.precioProducto}>{fmt(item.precio)}{item.tipo_venta === 'granel' ? `/${item.unidad || 'kg'}` : ''}</Text>
           </TouchableOpacity>
@@ -362,6 +455,43 @@ export default function POSScreen() {
         </Animated.View>
       )}
 
+      {/* Código escaneado que todavía no pertenece a ningún producto */}
+      <Modal visible={!!codigoHuerfano} transparent animationType="slide" onRequestClose={() => setCodigoHuerfano(null)}>
+        <KeyboardAvoidingView style={styles.modalFondo} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+          <Pressable style={StyleSheet.absoluteFill} onPress={() => setCodigoHuerfano(null)} />
+          <View style={[styles.modalCaja, { maxHeight: '85%' }]}>
+            <Text style={styles.modalTitulo}>Código nuevo</Text>
+            <Text style={styles.textoMuted}>
+              {codigoHuerfano} — todavía no está en ningún producto. Elige a cuál pertenece y queda guardado para siempre.
+            </Text>
+
+            <TextInput style={styles.input} placeholder="Buscar tu producto..." placeholderTextColor={colors.placeholder}
+              value={busquedaHuerfano} onChangeText={setBusquedaHuerfano} autoFocus />
+
+            <ScrollView style={{ maxHeight: 260 }} keyboardShouldPersistTaps="handled">
+              {productos
+                .filter(p => !p.codigo)
+                .filter(p => !busquedaHuerfano.trim() || p.nombre.toLowerCase().includes(busquedaHuerfano.toLowerCase()))
+                .slice(0, 30)
+                .map(p => (
+                  <TouchableOpacity key={p.id} style={styles.filaHuerfano} onPress={() => engancharCodigo(p)}>
+                    <Text style={styles.iconoProducto}>{iconoCategoria(p.categoria, categoriasCustom)}</Text>
+                    <Text style={{ flex: 1, color: colors.text, fontSize: 14, fontWeight: '600' }}>{p.nombre}</Text>
+                    <Text style={styles.precioProducto}>{fmt(p.precio)}</Text>
+                  </TouchableOpacity>
+                ))}
+              {productos.filter(p => !p.codigo).length === 0 && (
+                <Text style={styles.vacio}>Todos tus productos ya tienen código. Registra este producto desde la pestaña Productos.</Text>
+              )}
+            </ScrollView>
+
+            <TouchableOpacity style={[styles.botonGhost, { flex: 0 }]} onPress={() => { setCodigoHuerfano(null); setBusquedaHuerfano('') }}>
+              <Text style={styles.botonGhostTexto}>Ahora no</Text>
+            </TouchableOpacity>
+          </View>
+        </KeyboardAvoidingView>
+      </Modal>
+
       {/* Escáner de código de barras */}
       <Modal visible={scanner} animationType="slide" onRequestClose={() => setScanner(false)}>
         <BarcodeScannerModal
@@ -401,15 +531,38 @@ export default function POSScreen() {
             )}
 
             {metodoPago === 'Fiado' && (
-              <ScrollView style={{ maxHeight: 140, marginTop: 8 }}>
-                {clientes.length === 0 && <Text style={styles.vacio}>No hay clientes registrados todavía.</Text>}
-                {clientes.map(c => (
-                  <TouchableOpacity key={c.id} onPress={() => setClienteFiadoId(c.id)} style={[styles.clienteFila, clienteFiadoId === c.id && styles.clienteFilaActiva]}>
-                    <Text style={styles.clienteNombre}>{c.nombre}</Text>
-                    {c.deuda_total > 0 && <Text style={styles.clienteDeuda}>Debe {fmt(c.deuda_total)}</Text>}
+              <>
+                <TextInput
+                  style={styles.input}
+                  placeholder="Buscar cliente o escribir uno nuevo"
+                  placeholderTextColor={colors.placeholder}
+                  value={busquedaCliente}
+                  onChangeText={setBusquedaCliente}
+                />
+
+                <ScrollView style={{ maxHeight: 140 }} keyboardShouldPersistTaps="handled">
+                  {clientesFiltrados.map(c => (
+                    <TouchableOpacity key={c.id} onPress={() => setClienteFiadoId(c.id)} style={[styles.clienteFila, clienteFiadoId === c.id && styles.clienteFilaActiva]}>
+                      <Text style={styles.clienteNombre}>{c.nombre}</Text>
+                      {c.deuda_total > 0 && <Text style={styles.clienteDeuda}>Debe {fmt(c.deuda_total)}</Text>}
+                    </TouchableOpacity>
+                  ))}
+                </ScrollView>
+
+                {/* Crear al cliente sin salir del cobro: mandar al cajero a la
+                    pestaña Clientes con la cola esperando mataría la venta. */}
+                {puedeCrearCliente && (
+                  <TouchableOpacity style={styles.crearCliente} onPress={crearClienteYFiar} disabled={creandoCliente}>
+                    <Text style={styles.crearClienteTexto}>
+                      {creandoCliente ? 'Creando...' : `➕  Crear "${busquedaCliente.trim()}" y fiarle`}
+                    </Text>
                   </TouchableOpacity>
-                ))}
-              </ScrollView>
+                )}
+
+                {!clientesFiltrados.length && !busquedaCliente.trim() && (
+                  <Text style={styles.vacio}>Escribe el nombre del cliente para registrarlo al momento.</Text>
+                )}
+              </>
             )}
 
             <View style={styles.filaBotones}>
@@ -495,10 +648,15 @@ const styles = StyleSheet.create({
   listaProductos: { flex: 1, paddingHorizontal: 12 },
   filaProducto: { flexDirection: 'row', alignItems: 'center', backgroundColor: colors.card, borderRadius: 10, padding: 12, marginBottom: 8, borderWidth: 1, borderColor: colors.border },
   iconoProducto: { fontSize: 20, lineHeight: 26, marginRight: 10 },
+  filaSinStock: { opacity: 0.5, borderStyle: 'dashed' },
+  crearCliente: { paddingVertical: 12, paddingHorizontal: 14, borderRadius: 10, borderWidth: 1, borderStyle: 'dashed', borderColor: colors.primary, backgroundColor: colors.accentBg, alignItems: 'center' },
+  crearClienteTexto: { color: colors.accent, fontWeight: '700', fontSize: 13 },
+  sinStockTexto: { color: colors.danger, fontSize: 12, marginTop: 2, fontWeight: '600' },
   nombreProducto: { color: colors.text, fontWeight: '600', fontSize: 14 },
   stockProducto: { color: colors.textMuted, fontSize: 12, marginTop: 2 },
   precioProducto: { color: colors.accent, fontWeight: '700', fontSize: 15 },
   vacio: { color: colors.textMuted, textAlign: 'center', padding: 16, fontSize: 13 },
+  filaHuerfano: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: colors.border },
   panelCarrito: { borderTopWidth: 1, borderColor: colors.border, backgroundColor: colors.card, padding: 12 },
   filaCarrito: { flexDirection: 'row', alignItems: 'center', paddingVertical: 6, gap: 8 },
   itemNombre: { color: colors.text, flex: 1, fontSize: 13 },

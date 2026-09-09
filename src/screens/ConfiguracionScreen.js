@@ -5,7 +5,7 @@ import { File, Paths } from 'expo-file-system'
 import * as Sharing from 'expo-sharing'
 import * as AuthSession from 'expo-auth-session'
 import db from '../data/db'
-import { FRECUENCIAS, listarRespaldos } from '../data/respaldo'
+import { FRECUENCIAS, listarRespaldos, crearRespaldo } from '../data/respaldo'
 import { configDeRequest, DISCOVERY, intercambiarCodigoPorTokens, hayCuentaConectada, desconectarCuenta } from '../data/googleAuth'
 import { safDisponible, hayCarpetaElegida, elegirCarpetaPublica, olvidarCarpeta } from '../data/respaldoCarpeta'
 import { colors } from '../theme/colors'
@@ -15,6 +15,7 @@ export default function ConfiguracionScreen() {
   const [guardando, setGuardando] = useState(false)
   const [exito, setExito] = useState(false)
   const [exportando, setExportando] = useState(false)
+  const [restaurando, setRestaurando] = useState(false)
   const [respaldos, setRespaldos] = useState([])
   const [driveConectado, setDriveConectado] = useState(false)
   const [conectandoDrive, setConectandoDrive] = useState(false)
@@ -83,6 +84,54 @@ export default function ConfiguracionScreen() {
       { text: 'Cancelar', style: 'cancel' },
       { text: 'Elegir otra', onPress: async () => { await olvidarCarpeta(); await elegirCarpeta() } },
     ])
+  }
+
+  async function restaurarRespaldo() {
+    let datos
+    try {
+      const elegido = await File.pickFileAsync({ mimeTypes: ['application/json'] })
+      if (elegido.canceled) return
+      datos = JSON.parse(elegido.result.text())
+    } catch (e) {
+      Alert.alert('No se pudo leer', 'El archivo no se pudo abrir o no es un JSON válido.')
+      return
+    }
+
+    const { valido, error, resumen } = db.validarBackup(datos)
+    if (!valido) {
+      Alert.alert('Archivo no válido', error)
+      return
+    }
+
+    Alert.alert(
+      '¿Restaurar este respaldo?',
+      `Contiene ${resumen.productos} productos, ${resumen.ventas} ventas, ${resumen.clientes} clientes y ${resumen.fiados} fiados pendientes` +
+      `${resumen.negocio ? ` de "${resumen.negocio}"` : ''}.\n\n` +
+      'Se reemplazarán TODOS los datos actuales de este teléfono. Antes de hacerlo se guarda una copia de lo que tienes ahora, por si te arrepientes.\n\n' +
+      'Tus usuarios y contraseñas no cambian.',
+      [
+        { text: 'Cancelar', style: 'cancel' },
+        {
+          text: 'Restaurar',
+          style: 'destructive',
+          onPress: async () => {
+            setRestaurando(true)
+            // Copia de seguridad del estado actual antes de pisarlo: si el
+            // respaldo elegido resulta ser el equivocado, no se pierde nada.
+            await crearRespaldo().catch(() => {})
+            const r = await db.restaurarBackup(datos)
+            setRestaurando(false)
+            if (!r.success) {
+              Alert.alert('No se pudo restaurar', r.error)
+              return
+            }
+            setConfig(db.getConfig())
+            setRespaldos(listarRespaldos())
+            Alert.alert('✓ Restaurado', 'Tus datos volvieron. Revisa Productos e Historial para confirmar.')
+          },
+        },
+      ],
+    )
   }
 
   async function compartirArchivo(uri) {
@@ -232,6 +281,10 @@ export default function ConfiguracionScreen() {
 
         <TouchableOpacity style={styles.botonSecundario} onPress={exportarBackup} disabled={exportando}>
           <Text style={styles.botonSecundarioTexto}>{exportando ? 'Generando...' : '📤 Exportar backup ahora'}</Text>
+        </TouchableOpacity>
+
+        <TouchableOpacity style={styles.botonSecundario} onPress={restaurarRespaldo} disabled={restaurando}>
+          <Text style={styles.botonSecundarioTexto}>{restaurando ? 'Restaurando...' : '♻️ Restaurar desde un archivo'}</Text>
         </TouchableOpacity>
       </View>
 
