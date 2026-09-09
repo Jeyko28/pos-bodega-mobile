@@ -685,10 +685,16 @@ async function realizarVenta(items, montoRecibido, metodoPago = 'Efectivo', desc
     ventaId = r.lastInsertRowId
 
     items.forEach(item => {
+      // Un monto suelto (pan, hielo, una bolsa) no es un producto del catálogo:
+      // se registra en la venta para que la caja cuadre, pero no apunta a
+      // ninguna fila de `productos` ni descuenta stock de nada.
+      const productoId = Number.isInteger(item.id) ? item.id : null
       sql.runSync(
         'INSERT INTO detalle_ventas (venta_id, producto_id, nombre_producto, precio_unitario, cantidad, subtotal, tipo_venta, unidad) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
-        ventaId, item.id, item.nombre, item.precio, item.cantidad, item.subtotal, item.tipo_venta || 'unidad', item.unidad || 'unidad')
-      sql.runSync('UPDATE productos SET stock = MAX(0, stock - ?) WHERE id = ?', parseFloat(item.cantidad), item.id)
+        ventaId, productoId, item.nombre, item.precio, item.cantidad, item.subtotal, item.tipo_venta || 'unidad', item.unidad || 'unidad')
+      if (productoId) {
+        sql.runSync('UPDATE productos SET stock = MAX(0, stock - ?) WHERE id = ?', parseFloat(item.cantidad), productoId)
+      }
     })
 
     if (esFiado && clienteId) {

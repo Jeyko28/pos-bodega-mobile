@@ -20,6 +20,8 @@ const MONTOS_RAPIDOS = [1, 2, 5, 10]
 // Billetes y monedas con los que realmente paga la gente en una bodega.
 const BILLETES = [2, 5, 10, 20, 50, 100, 200]
 const PESOS_RAPIDOS = [0.25, 0.5, 1, 2]
+// Lo que más se vende suelto en una bodega: pan, hielo, una bolsa.
+const MONTOS_SUELTOS = [0.5, 1, 2, 5]
 
 // El número de "Cliente N" se calcula según los carritos abiertos en ese
 // momento (el menor número libre) — no un contador que solo sube y sube.
@@ -67,6 +69,8 @@ export default function POSScreen() {
   const [busquedaHuerfano, setBusquedaHuerfano] = useState('')
   const [nuevoProducto, setNuevoProducto] = useState({ nombre: '', precio: '' })
   const [creandoProducto, setCreandoProducto] = useState(false)
+  const [modalSuelto, setModalSuelto] = useState(false)
+  const [montoSuelto, setMontoSuelto] = useState('')
 
   const [aviso, setAviso] = useState(null)
   const avisoOpacidad = useRef(new Animated.Value(0)).current
@@ -139,6 +143,24 @@ export default function POSScreen() {
       nuevos = [...items, { id: p.id, nombre: p.nombre, precio: p.precio, cantidad: 1, subtotal: p.precio, tipo_venta: p.tipo_venta, unidad: p.unidad }]
     }
     actualizarCarritoActivo(nuevos)
+  }
+
+  // El id no es numérico a propósito: así `realizarVenta` sabe que no apunta a
+  // ningún producto del catálogo y no le descuenta stock a nadie.
+  function agregarMontoSuelto() {
+    const monto = parseFloat(montoSuelto)
+    if (!(monto > 0)) return
+    actualizarCarritoActivo([...carritoActivo.items, {
+      id: `suelto-${Date.now()}`,
+      nombre: 'Varios',
+      precio: monto,
+      cantidad: 1,
+      subtotal: monto,
+      tipo_venta: 'unidad',
+      unidad: 'unidad',
+    }])
+    setModalSuelto(false)
+    setMontoSuelto('')
   }
 
   function codigoEscaneado(codigo) {
@@ -434,6 +456,12 @@ export default function POSScreen() {
           value={busqueda} onChangeText={setBusqueda} />
         <TouchableOpacity style={styles.botonEscanear} onPress={() => { setMensajeScanner(null); setScanner(true) }}>
           <Text style={styles.botonEscanearTexto}>📷</Text>
+        </TouchableOpacity>
+        {/* Pan, hielo, una bolsa: cosas que se venden todos los días y que
+            nadie va a dar de alta como producto. Sin esta salida, esa venta se
+            quedaba fuera del sistema y se llevaba el cuadre de caja con ella. */}
+        <TouchableOpacity style={styles.botonEscanear} onPress={() => { setMontoSuelto(''); setModalSuelto(true) }}>
+          <Text style={styles.botonSueltoTexto}>S/</Text>
         </TouchableOpacity>
       </View>
 
@@ -731,6 +759,47 @@ export default function POSScreen() {
       </Modal>
 
       {/* Modal de peso (granel) */}
+      <Modal visible={modalSuelto} transparent animationType="slide" onRequestClose={() => setModalSuelto(false)}>
+        <View style={[styles.modalFondo, { paddingBottom: alturaTeclado }]}>
+          <Pressable style={StyleSheet.absoluteFill} onPress={() => setModalSuelto(false)} />
+          <ScrollView style={styles.modalScrollLimite} contentContainerStyle={[styles.modalCaja, { paddingBottom: 20 + espacioAbajo }]} keyboardShouldPersistTaps="handled">
+            <Text style={styles.modalTitulo}>S/ Cobrar un monto suelto</Text>
+            <Text style={styles.textoMuted}>Para lo que no está en el catálogo: pan, hielo, una bolsa. Entra al carrito como "Varios" y no toca el stock de nada.</Text>
+
+            <TextInput
+              style={[styles.input, styles.inputPeso]}
+              placeholder="S/ 0.00"
+              placeholderTextColor={colors.placeholder}
+              keyboardType="decimal-pad"
+              value={montoSuelto}
+              onChangeText={setMontoSuelto}
+              autoFocus
+            />
+
+            <View style={styles.pesosRapidosFila}>
+              {MONTOS_SUELTOS.map(v => (
+                <TouchableOpacity key={v} style={styles.botonPesoRapido} onPress={() => setMontoSuelto(String(v))}>
+                  <Text style={styles.botonPesoRapidoTexto}>S/{v}</Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+
+            <View style={styles.filaBotones}>
+              <TouchableOpacity style={styles.botonGhost} onPress={() => setModalSuelto(false)}>
+                <Text style={styles.botonGhostTexto}>Cancelar</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.botonPrimario, !(parseFloat(montoSuelto) > 0) && styles.botonDeshabilitado]}
+                onPress={agregarMontoSuelto}
+                disabled={!(parseFloat(montoSuelto) > 0)}
+              >
+                <Text style={styles.botonPrimarioTexto}>Agregar</Text>
+              </TouchableOpacity>
+            </View>
+          </ScrollView>
+        </View>
+      </Modal>
+
       <Modal visible={!!productoGranel} transparent animationType="slide" onRequestClose={() => setProductoGranel(null)}>
         <View style={[styles.modalFondo, { paddingBottom: alturaTeclado }]}>
           <Pressable style={StyleSheet.absoluteFill} onPress={() => setProductoGranel(null)} />
@@ -798,6 +867,7 @@ const styles = StyleSheet.create({
   buscador: { flex: 1, backgroundColor: colors.input, borderWidth: 1, borderColor: colors.border, borderRadius: 10, padding: 12, color: colors.text },
   botonEscanear: { width: 48, height: 48, alignItems: 'center', justifyContent: 'center', borderRadius: 10, borderWidth: 1, borderColor: colors.borderStrong, backgroundColor: colors.card },
   botonEscanearTexto: { fontSize: 22, lineHeight: 28 },
+  botonSueltoTexto: { fontSize: 18, lineHeight: 24, fontWeight: '800', color: colors.accent },
   listaProductos: { flex: 1, paddingHorizontal: 12 },
   filaProducto: { flexDirection: 'row', alignItems: 'center', backgroundColor: colors.card, borderRadius: 10, padding: 12, marginBottom: 8, borderWidth: 1, borderColor: colors.border },
   iconoProducto: { fontSize: 20, lineHeight: 26, marginRight: 10 },
