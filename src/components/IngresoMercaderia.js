@@ -8,12 +8,14 @@ import BarcodeScannerModal from './BarcodeScannerModal'
 import { iconoCategoria } from '../data/categorias'
 import { coincide } from '../utils/texto'
 import { colors } from '../theme/colors'
+import { useSesion } from '../context/SesionContext'
 
 // Pantalla para cuando llega el proveedor: se van agregando productos y cuánto
 // llegó de cada uno, y al final se suma todo de una sola vez. La alternativa
 // (abrir la ficha de cada producto y reescribir el stock haciendo la suma a
 // mano) es la razón por la que en la práctica el inventario nunca se actualiza.
 export default function IngresoMercaderia({ onCerrar, onGuardado }) {
+  const { usuario } = useSesion()
   const insets = useSafeAreaInsets()
   const [productos, setProductos] = useState([])
   const [categoriasCustom, setCategoriasCustom] = useState([])
@@ -25,6 +27,8 @@ export default function IngresoMercaderia({ onCerrar, onGuardado }) {
   const [cargado, setCargado] = useState(false)
   const [codigoDesconocido, setCodigoDesconocido] = useState(null)
   const [nuevo, setNuevo] = useState({ nombre: '', precio: '', cantidad: '1' })
+  const [vista, setVista] = useState('ingreso')
+  const [ingresos, setIngresos] = useState([])
   const [guardando, setGuardando] = useState(false)
 
   useEffect(() => {
@@ -122,12 +126,57 @@ export default function IngresoMercaderia({ onCerrar, onGuardado }) {
     const validas = entradas.filter(e => parseFloat(e.cantidad) > 0)
     if (!validas.length) return
     setGuardando(true)
-    const r = await db.ingresarMercaderia(validas)
+    const r = await db.ingresarMercaderia(validas, usuario?.id)
     await db.updateConfig({ ingreso_en_curso: [] })
+    setEntradas([])
     setGuardando(false)
     onGuardado?.(r)
-    Alert.alert('✓ Mercadería ingresada', `Se actualizó el stock de ${r.actualizados} productos.`)
-    onCerrar()
+
+    // El deshacer se ofrece en el momento, que es cuando el dueño se da cuenta
+    // de que escribió 500 en vez de 50.
+    Alert.alert(
+      '✓ Mercadería ingresada',
+      `Se actualizó el stock de ${r.actualizados} productos.`,
+      [
+        { text: 'Listo', onPress: onCerrar },
+        {
+          text: 'Deshacer',
+          style: 'destructive',
+          onPress: async () => {
+            const d = await db.deshacerIngreso(r.ingresoId)
+            if (!d.success) { Alert.alert('No se pudo deshacer', d.error); return }
+            onGuardado?.({ actualizados: 0 })
+            Alert.alert('Ingreso deshecho', 'El stock volvió a como estaba.')
+          },
+        },
+      ],
+    )
+  }
+
+  function abrirHistorial() {
+    setIngresos(db.getIngresos())
+    setVista('historial')
+  }
+
+  async function deshacerDesdeHistorial(ingreso) {
+    Alert.alert(
+      'Deshacer este ingreso',
+      `Se le restará al stock lo que sumó este ingreso (${ingreso.productos} productos). Esto no se puede volver a aplicar.`,
+      [
+        { text: 'Cancelar', style: 'cancel' },
+        {
+          text: 'Deshacer',
+          style: 'destructive',
+          onPress: async () => {
+            const d = await db.deshacerIngreso(ingreso.id)
+            if (!d.success) { Alert.alert('No se pudo deshacer', d.error); return }
+            setIngresos(db.getIngresos())
+            setProductos(db.getProductos())
+            onGuardado?.({ actualizados: 0 })
+          },
+        },
+      ],
+    )
   }
 
   function salir() {
@@ -167,13 +216,49 @@ export default function IngresoMercaderia({ onCerrar, onGuardado }) {
         <Text style={styles.ayuda}>
           Escanea o busca lo que llegó y escribe la cantidad. Se <Text style={{ fontWeight: '700' }}>suma</Text> a lo que ya tenías; no hace falta que calcules el total.
         </Text>
-        {retomado > 0 && (
+        {retomado > 0 && vista === 'ingreso' && (
           <Text style={styles.retomado}>
             ↩︎ Retomaste un ingreso a medias de {retomado} productos.
           </Text>
         )}
+        <TouchableOpacity onPress={() => (vista === 'ingreso' ? abrirHistorial() : setVista('ingreso'))}>
+          <Text style={styles.enlaceHistorial}>
+            {vista === 'ingreso' ? '🕘  Ver ingresos anteriores' : '← Volver al ingreso'}
+          </Text>
+        </TouchableOpacity>
       </View>
 
+      {vista === 'historial' && (
+        <ScrollView style={styles.lista}>
+          {ingresos.length === 0 && <Text style={styles.vacio}>Todavía no has ingresado mercadería.</Text>}
+          {ingresos.map((i, idx) => {
+            // Solo el más reciente que siga vigente puede revertirse: deshacer uno
+            // viejo, con ventas de por medio, dejaría un stock sin sentido.
+            const esElUltimoVigente = !i.deshecho && !ingresos.slice(0, idx).some(otro => !otro.deshecho)
+            return (
+              <View key={i.id} style={[styles.filaIngreso, i.deshecho && styles.filaDeshecha]}>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.nombre}>
+                    {new Date(i.fecha).toLocaleString('es-PE')}
+                  </Text>
+                  <Text style={styles.meta}>
+                    {i.productos} productos · {i.unidades} unidades
+                    {i.nombre_usuario ? ` · ${i.nombre_usuario}` : ''}
+                    {i.deshecho ? ' · DESHECHO' : ''}
+                  </Text>
+                </View>
+                {esElUltimoVigente && (
+                  <TouchableOpacity onPress={() => deshacerDesdeHistorial(i)}>
+                    <Text style={styles.accionDeshacer}>Deshacer</Text>
+                  </TouchableOpacity>
+                )}
+              </View>
+            )
+          })}
+        </ScrollView>
+      )}
+
+      {vista === 'ingreso' && (
       <View style={styles.filaBusqueda}>
         <TextInput
           style={styles.buscador}
@@ -186,8 +271,9 @@ export default function IngresoMercaderia({ onCerrar, onGuardado }) {
           <Ionicons name="barcode-outline" size={24} color={colors.text} />
         </TouchableOpacity>
       </View>
+      )}
 
-      {codigoDesconocido && (
+      {vista === 'ingreso' && codigoDesconocido && (
         <View style={styles.cajaNuevo}>
           <Text style={styles.nuevoTitulo}>Producto nuevo · código {codigoDesconocido}</Text>
           <View style={styles.nuevoFila}>
@@ -227,6 +313,7 @@ export default function IngresoMercaderia({ onCerrar, onGuardado }) {
         </View>
       )}
 
+      {vista === 'ingreso' && (
       <ScrollView style={styles.lista} keyboardShouldPersistTaps="handled">
         {entradas.length > 0 && (
           <>
@@ -275,6 +362,7 @@ export default function IngresoMercaderia({ onCerrar, onGuardado }) {
           </Text>
         )}
       </ScrollView>
+      )}
 
       <View style={[styles.pie, { paddingBottom: insets.bottom + 16 }]}>
         <TouchableOpacity style={styles.botonGhost} onPress={salir}>
@@ -301,6 +389,10 @@ const styles = StyleSheet.create({
   ayuda: { color: colors.textMuted, fontSize: 12, lineHeight: 17, marginTop: 6 },
 
   retomado: { color: colors.accent, fontSize: 12, fontWeight: '700', marginTop: 8 },
+  enlaceHistorial: { color: colors.accent, fontSize: 13, fontWeight: '700', marginTop: 10 },
+  filaIngreso: { flexDirection: 'row', alignItems: 'center', gap: 10, backgroundColor: colors.card, borderRadius: 10, padding: 12, marginBottom: 8, borderWidth: 1, borderColor: colors.border },
+  filaDeshecha: { opacity: 0.5, borderStyle: 'dashed' },
+  accionDeshacer: { color: colors.danger, fontWeight: '700', fontSize: 13 },
   cajaNuevo: { marginHorizontal: 12, marginBottom: 8, padding: 12, borderRadius: 10, borderWidth: 1, borderStyle: 'dashed', borderColor: colors.primary, backgroundColor: colors.accentBg, gap: 8 },
   nuevoTitulo: { color: colors.accent, fontSize: 12, fontWeight: '700' },
   nuevoFila: { flexDirection: 'row', gap: 8 },

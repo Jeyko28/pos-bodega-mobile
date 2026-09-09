@@ -38,11 +38,23 @@ export default function ClientesScreen() {
     setTelefonoEdit(c.telefono || '')
   }
 
+  const telefonoCambiado = clienteDetalle && telefonoEdit.trim() !== (clienteDetalle.telefono || '').trim()
+
   async function guardarTelefono() {
+    if (!clienteDetalle || !telefonoCambiado) return
     await db.updateCliente({ id: clienteDetalle.id, telefono: telefonoEdit })
     const actualizados = db.getClientes()
     setClientes(actualizados)
     setClienteDetalle(actualizados.find(c => c.id === clienteDetalle.id))
+  }
+
+  // Tocar fuera cierra el modal, y eso ocurría antes de que el campo perdiera
+  // el foco: el número tecleado se perdía sin aviso. Se guarda al cerrar, venga
+  // el cierre de donde venga.
+  async function cerrarDetalle() {
+    await guardarTelefono()
+    setClienteDetalle(null)
+    setBorradorMensaje(null)
   }
 
   const deudaTotal = fiados.filter(f => f.estado === 'pendiente').reduce((s, f) => s + f.saldo, 0)
@@ -114,24 +126,34 @@ export default function ClientesScreen() {
       </Modal>
 
       {/* Detalle / fiado */}
-      <Modal visible={!!clienteDetalle} transparent animationType="slide" onRequestClose={() => setClienteDetalle(null)}>
+      <Modal visible={!!clienteDetalle} transparent animationType="slide" onRequestClose={cerrarDetalle}>
         <KeyboardAvoidingView style={styles.modalFondo} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
-          <Pressable style={StyleSheet.absoluteFill} onPress={() => setClienteDetalle(null)} />
+          <Pressable style={StyleSheet.absoluteFill} onPress={cerrarDetalle} />
           <View style={[styles.modalCaja, { maxHeight: '80%' }]}>
             <Text style={styles.modalTitulo}>{clienteDetalle?.nombre}</Text>
 
             {/* El teléfono se puede guardar siempre, deba o no: si solo apareciera
                 con deuda, habría que esperar a que deba para poder anotarlo. */}
             <View style={styles.bloqueCobranza}>
-              <TextInput
-                style={styles.input}
-                placeholder="Teléfono (para escribirle por WhatsApp)"
-                placeholderTextColor={colors.placeholder}
-                keyboardType="phone-pad"
-                value={telefonoEdit}
-                onChangeText={setTelefonoEdit}
-                onBlur={guardarTelefono}
-              />
+              <View style={styles.filaTelefono}>
+                <TextInput
+                  style={[styles.input, { flex: 1 }]}
+                  placeholder="Teléfono (para escribirle por WhatsApp)"
+                  placeholderTextColor={colors.placeholder}
+                  keyboardType="phone-pad"
+                  value={telefonoEdit}
+                  onChangeText={setTelefonoEdit}
+                  onBlur={guardarTelefono}
+                />
+                {telefonoCambiado && (
+                  <TouchableOpacity style={styles.botonGuardarTel} onPress={guardarTelefono}>
+                    <Text style={styles.botonGuardarTelTexto}>Guardar</Text>
+                  </TouchableOpacity>
+                )}
+              </View>
+              {!telefonoCambiado && telefonoEdit.trim() !== '' && (
+                <Text style={styles.telefonoGuardado}>✓ Número guardado</Text>
+              )}
 
               {deudaTotal > 0 && borradorMensaje === null && (
                 <TouchableOpacity
@@ -191,7 +213,7 @@ export default function ClientesScreen() {
                 </View>
               ))}
             </ScrollView>
-            <TouchableOpacity style={styles.botonGhost} onPress={() => setClienteDetalle(null)}><Text style={styles.botonGhostTexto}>Cerrar</Text></TouchableOpacity>
+            <TouchableOpacity style={styles.botonGhost} onPress={cerrarDetalle}><Text style={styles.botonGhostTexto}>Cerrar</Text></TouchableOpacity>
           </View>
         </KeyboardAvoidingView>
       </Modal>
@@ -220,6 +242,9 @@ const styles = StyleSheet.create({
   botonGhostTexto: { color: colors.textMuted, fontWeight: '600' },
   botonPrimario: { flex: 1, padding: 14, borderRadius: 10, backgroundColor: colors.primary, alignItems: 'center' },
   botonPrimarioTexto: { color: colors.primaryText, fontWeight: '700' },
+  botonGuardarTel: { paddingHorizontal: 16, justifyContent: 'center', borderRadius: 10, backgroundColor: colors.primary },
+  botonGuardarTelTexto: { color: colors.primaryText, fontWeight: '700', fontSize: 13 },
+  telefonoGuardado: { color: colors.accent, fontSize: 11, fontWeight: '600' },
   etiquetaMensaje: { color: colors.textMuted, fontSize: 11, fontWeight: '700', textTransform: 'uppercase', letterSpacing: 0.5 },
   mensajeInput: { minHeight: 92, textAlignVertical: 'top' },
   bloqueCobranza: { gap: 8, paddingBottom: 12, marginBottom: 4, borderBottomWidth: 1, borderBottomColor: colors.border },

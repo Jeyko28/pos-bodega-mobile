@@ -106,6 +106,22 @@ CREATE TABLE IF NOT EXISTS categorias_custom (
   icon TEXT
 );
 
+CREATE TABLE IF NOT EXISTS ingresos (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  fecha TEXT NOT NULL,
+  usuario_id INTEGER,
+  deshecho INTEGER NOT NULL DEFAULT 0
+);
+
+CREATE TABLE IF NOT EXISTS detalle_ingresos (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  ingreso_id INTEGER NOT NULL,
+  producto_id INTEGER,
+  nombre_producto TEXT NOT NULL,
+  cantidad REAL NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_detalle_ingreso ON detalle_ingresos(ingreso_id);
+
 CREATE TABLE IF NOT EXISTS config (
   clave TEXT PRIMARY KEY,
   valor TEXT
@@ -362,17 +378,66 @@ async function addProductosLote(productos) {
 // sabe cuánto LLEGÓ, no cuánto queda en total. Obligarlo a hacer esa suma de
 // cabeza, producto por producto, es la razón por la que el inventario termina
 // mintiendo y la app dejando de servir.
-async function ingresarMercaderia(entradas) {
+async function ingresarMercaderia(entradas, usuarioId = null) {
   let actualizados = 0
+  let ingresoId = null
+
   sql.withTransactionSync(() => {
-    entradas.forEach(({ id, cantidad }) => {
+    const r = sql.runSync('INSERT INTO ingresos (fecha, usuario_id) VALUES (?, ?)', new Date().toISOString(), usuarioId)
+    ingresoId = r.lastInsertRowId
+
+    entradas.forEach(({ id, nombre, cantidad }) => {
       const suma = parseFloat(cantidad)
       if (!suma || suma <= 0) return
       sql.runSync('UPDATE productos SET stock = stock + ? WHERE id = ?', suma, id)
+      // Se guarda cuánto sumó cada producto: sin ese dato no habría forma de
+      // revertir un ingreso mal tipeado (500 en vez de 50) sin obligar al dueño
+      // a calcular la resta a mano, que es justo lo que esta pantalla evita.
+      sql.runSync(
+        'INSERT INTO detalle_ingresos (ingreso_id, producto_id, nombre_producto, cantidad) VALUES (?, ?, ?, ?)',
+        ingresoId, id, nombre || '', suma)
       actualizados++
     })
   })
-  return { actualizados }
+
+  return { actualizados, ingresoId }
+}
+
+function getIngresos(limite = 20) {
+  const ingresos = sql.getAllSync(`
+    SELECT i.*, u.nombre AS nombre_usuario, COUNT(d.id) AS productos, COALESCE(SUM(d.cantidad), 0) AS unidades
+    FROM ingresos i
+    LEFT JOIN detalle_ingresos d ON d.ingreso_id = i.id
+    LEFT JOIN usuarios u ON u.id = i.usuario_id
+    GROUP BY i.id
+    ORDER BY i.fecha DESC
+    LIMIT ?
+  `, limite)
+  return ingresos.map(i => ({ ...i, deshecho: !!i.deshecho }))
+}
+
+function getDetalleIngreso(ingresoId) {
+  return sql.getAllSync('SELECT * FROM detalle_ingresos WHERE ingreso_id = ?', ingresoId)
+}
+
+// Solo se puede deshacer el ingreso más reciente. Revertir uno de hace semanas,
+// con ventas de por medio, dejaría el stock en un número que no significa nada.
+async function deshacerIngreso(ingresoId) {
+  const ultimo = sql.getFirstSync('SELECT id FROM ingresos WHERE deshecho = 0 ORDER BY fecha DESC LIMIT 1')
+  if (!ultimo || ultimo.id !== ingresoId) {
+    return { success: false, error: 'Solo se puede deshacer el ingreso más reciente.' }
+  }
+
+  sql.withTransactionSync(() => {
+    getDetalleIngreso(ingresoId).forEach(d => {
+      if (d.producto_id) sql.runSync('UPDATE productos SET stock = stock - ? WHERE id = ?', d.cantidad, d.producto_id)
+    })
+    // Queda marcado en vez de borrado: el ingreso ocurrió, y esconder que se
+    // revirtió haría que el historial mienta.
+    sql.runSync('UPDATE ingresos SET deshecho = 1 WHERE id = ?', ingresoId)
+  })
+
+  return { success: true }
 }
 
 // Engancha un código de barras real a un producto que se cargó sin él (por
@@ -784,7 +849,8 @@ export default {
   isSetupCompletado, completarSetup,
   login, getUsuarios, addUsuario, cambiarPassword, setUsuarioActivo,
   getProductos, addProducto, updateProducto, deleteProducto, getProductosBajoStock,
-  addProductosLote, asignarCodigo, ingresarMercaderia, getMasVendidos,
+  addProductosLote, asignarCodigo, getMasVendidos,
+  ingresarMercaderia, getIngresos, getDetalleIngreso, deshacerIngreso,
   getCategoriasCustom, addCategoriaCustom,
   getConfig, updateConfig, getBackupJSON, restaurarBackup, validarBackup,
   getClientes, addCliente, updateCliente, buscarCliente,
