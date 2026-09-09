@@ -711,8 +711,13 @@ async function realizarVenta(items, montoRecibido, metodoPago = 'Efectivo', desc
       sql.runSync(
         'INSERT INTO detalle_ventas (venta_id, producto_id, nombre_producto, precio_unitario, cantidad, subtotal, tipo_venta, unidad, costo_unitario) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
         ventaId, productoId, item.nombre, item.precio, item.cantidad, item.subtotal, item.tipo_venta || 'unidad', item.unidad || 'unidad', costo)
+      // Sin tope en cero: si se vendió más de lo registrado, el stock queda
+      // negativo a propósito. Frenarlo en 0 hace que el inventario se desvíe en
+      // silencio — al ingresar 20 del proveedor diría 20 cuando en el estante
+      // hay 15. En negativo se corrige solo al ingresar, y el número dice
+      // cuánto se vendió sin registrar.
       if (productoId) {
-        sql.runSync('UPDATE productos SET stock = MAX(0, stock - ?) WHERE id = ?', parseFloat(item.cantidad), productoId)
+        sql.runSync('UPDATE productos SET stock = stock - ? WHERE id = ?', parseFloat(item.cantidad), productoId)
       }
     })
 

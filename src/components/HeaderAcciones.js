@@ -64,7 +64,19 @@ export function construirAvisos({ bajoStock = [], fiadosAntiguos = [] }) {
   const avisos = []
 
   bajoStock.forEach(p => {
-    const sinStock = parseFloat(p.stock) === 0
+    const stock = parseFloat(p.stock)
+    // En negativo se vendió más de lo registrado: el aviso dice cuánto falta
+    // ingresar, que es la acción concreta, en vez de un "quedan -3".
+    if (stock < 0) {
+      avisos.push({
+        id: `stock-${p.id}`,
+        icono: '🔴',
+        titulo: `${p.nombre} — faltan ${Math.abs(stock)} por ingresar`,
+        detalle: 'Se vendió más de lo registrado. Ingresa lo que llegó del proveedor.',
+      })
+      return
+    }
+    const sinStock = stock === 0
     avisos.push({
       id: `stock-${p.id}`,
       icono: sinStock ? '🔴' : '⚠️',

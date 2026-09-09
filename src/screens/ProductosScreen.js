@@ -14,6 +14,17 @@ import { coincide } from '../utils/texto'
 
 const fmt = (n) => `S/ ${Number(n).toFixed(2)}`
 
+// El stock negativo no es un error: significa que se vendió más de lo que
+// estaba registrado. Mostrarlo como "-3" no le dice nada al dueño; decirle
+// cuántas faltan por ingresar sí, porque es exactamente lo que tiene que hacer.
+function textoStock(p) {
+  const stock = parseFloat(p.stock)
+  const unidad = p.tipo_venta === 'granel' ? (p.unidad || 'kg') : 'uds'
+  if (stock < 0) return `Faltan ${Math.abs(stock)} ${unidad} por ingresar`
+  if (stock === 0) return 'Sin stock'
+  return `Stock: ${p.stock} ${unidad}`
+}
+
 // El granel no siempre es peso: en bodega el plátano o el huevo se venden
 // sueltos y contados. La unidad define cómo se pide y cómo se cobra.
 const UNIDADES_GRANEL = [
@@ -151,8 +162,8 @@ export default function ProductosScreen() {
               <Text style={styles.nombre}>{item.nombre}</Text>
               <Text style={styles.detalle}>
                 {CATEGORIAS.find(c => c.id === item.categoria)?.icon || '🏷️'} {item.categoria || 'General'} ·{' '}
-                <Text style={enAlerta(item) && (parseFloat(item.stock) === 0 ? styles.stockCero : styles.stockBajo)}>
-                  {parseFloat(item.stock) === 0 ? 'Sin stock' : `Stock: ${item.stock} ${item.tipo_venta === 'granel' ? (item.unidad || 'kg') : 'uds'}`}
+                <Text style={enAlerta(item) && (parseFloat(item.stock) <= 0 ? styles.stockCero : styles.stockBajo)}>
+                  {textoStock(item)}
                 </Text>
               </Text>
             </View>

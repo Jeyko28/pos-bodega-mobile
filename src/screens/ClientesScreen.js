@@ -11,6 +11,8 @@ import { useSesion } from '../context/SesionContext'
 const fmt = (n) => `S/ ${Number(n).toFixed(2)}`
 const METODOS = ['Efectivo', 'Yape', 'Plin']
 const ICONO_METODO = { Efectivo: '💵', Yape: '📱', Plin: '📲' }
+// Los mismos billetes con los que paga la gente en el mostrador.
+const BILLETES = [2, 5, 10, 20, 50, 100, 200]
 
 export default function ClientesScreen() {
   const { usuario } = useSesion()
@@ -24,6 +26,7 @@ export default function ClientesScreen() {
   const [montoAbono, setMontoAbono] = useState('')
   const [metodoAbono, setMetodoAbono] = useState('Efectivo')
   const [abonando, setAbonando] = useState(false)
+  const [recibido, setRecibido] = useState('')
 
   const [telefonoEdit, setTelefonoEdit] = useState('')
   const [borradorMensaje, setBorradorMensaje] = useState(null)
@@ -90,6 +93,12 @@ export default function ClientesScreen() {
     if (enviado) setBorradorMensaje(null)
   }
 
+  // Solo informativo: a la caja entra el abono aplicado, porque el vuelto sale
+  // de vuelta al cliente en el mismo movimiento. Sirve para no sacar la cuenta
+  // de cabeza con el casero enfrente.
+  const recibidoNum = parseFloat(recibido)
+  const vuelto = isNaN(recibidoNum) ? null : Math.round((recibidoNum - (parseFloat(montoAbono) || 0)) * 100) / 100
+
   async function abonar() {
     setAbonando(true)
     const r = await db.abonarACliente({
@@ -102,12 +111,13 @@ export default function ClientesScreen() {
     if (!r.success) { Alert.alert('No se pudo abonar', r.error); return }
 
     setMontoAbono('')
+    setRecibido('')
     setFiados(db.getFiadoCliente(clienteDetalle.id))
     cargar()
 
     const resto = r.saldo_restante > 0 ? `Le queda ${fmt(r.saldo_restante)}.` : 'Quedó al día. 🎉'
-    const vuelto = r.sobrante > 0 ? `\n\nTe dio ${fmt(r.sobrante)} de más: devuélveselo.` : ''
-    Alert.alert('✓ Abono anotado', `Se abonaron ${fmt(r.abonado)}. ${resto}${vuelto}`)
+    const sobrante = r.sobrante > 0 ? `\n\nEscribiste ${fmt(r.sobrante)} más de lo que debía: solo se abonó su deuda.` : ''
+    Alert.alert('✓ Abono anotado', `Se abonaron ${fmt(r.abonado)}. ${resto}${sobrante}`)
   }
 
   return (
@@ -251,9 +261,37 @@ export default function ClientesScreen() {
                     <Text style={styles.botonPagarTexto}>{abonando ? '...' : 'Abonar'}</Text>
                   </TouchableOpacity>
                 </View>
-                <TouchableOpacity onPress={() => setMontoAbono(String(deudaTotal))}>
+                <TouchableOpacity onPress={() => { setMontoAbono(String(deudaTotal)); setRecibido('') }}>
                   <Text style={styles.pagarTodo}>Paga todo ({fmt(deudaTotal)})</Text>
                 </TouchableOpacity>
+
+                {/* El casero debe 8 y paga con 10: sin esto el dueño saca el
+                    vuelto de cabeza con el cliente enfrente. En Yape y Plin no
+                    aplica — ahí el monto entra exacto. */}
+                {metodoAbono === 'Efectivo' && parseFloat(montoAbono) > 0 && (
+                  <>
+                    <View style={styles.billetesFila}>
+                      {BILLETES.filter(b => b > parseFloat(montoAbono)).slice(0, 4).map(b => (
+                        <TouchableOpacity key={b} style={styles.billete} onPress={() => setRecibido(String(b))}>
+                          <Text style={styles.billeteTexto}>{b}</Text>
+                        </TouchableOpacity>
+                      ))}
+                    </View>
+                    <TextInput
+                      style={styles.input}
+                      placeholder="¿Con cuánto te paga? (opcional)"
+                      placeholderTextColor={colors.placeholder}
+                      keyboardType="decimal-pad"
+                      value={recibido}
+                      onChangeText={setRecibido}
+                    />
+                    {vuelto !== null && (
+                      <Text style={vuelto >= 0 ? styles.vueltoOk : styles.vueltoFalta}>
+                        {vuelto >= 0 ? `Vuelto: ${fmt(vuelto)}` : `Falta: ${fmt(Math.abs(vuelto))}`}
+                      </Text>
+                    )}
+                  </>
+                )}
               </View>
             )}
 
@@ -323,6 +361,11 @@ const styles = StyleSheet.create({
   metodoChipActivo: { borderColor: colors.primary, backgroundColor: colors.card },
   metodoChipTexto: { color: colors.textMuted, fontWeight: '600', fontSize: 12 },
   metodoChipTextoActivo: { color: colors.accent, fontWeight: '700' },
+  billetesFila: { flexDirection: 'row', gap: 6, marginTop: 4 },
+  billete: { flex: 1, paddingVertical: 8, borderRadius: 8, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.card, alignItems: 'center' },
+  billeteTexto: { color: colors.text, fontWeight: '700', fontSize: 13 },
+  vueltoOk: { color: colors.accent, fontWeight: '800', fontSize: 15, marginTop: 6 },
+  vueltoFalta: { color: colors.danger, fontWeight: '800', fontSize: 15, marginTop: 6 },
   pagarTodo: { color: colors.accent, fontWeight: '700', fontSize: 13, textAlign: 'center', paddingVertical: 4 },
   subtituloHistorial: { color: colors.textMuted, fontSize: 11, fontWeight: '700', textTransform: 'uppercase', letterSpacing: 0.5, marginTop: 16, marginBottom: 4 },
   botonPagarTexto: { color: colors.primaryText, fontWeight: '700', fontSize: 12 },
