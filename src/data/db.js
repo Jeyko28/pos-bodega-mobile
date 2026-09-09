@@ -62,7 +62,9 @@ CREATE TABLE IF NOT EXISTS ventas (
   es_fiado INTEGER NOT NULL DEFAULT 0,
   comprador_nombre TEXT,
   comprador_dni_ruc TEXT,
-  fecha TEXT NOT NULL
+  fecha TEXT NOT NULL,
+  anulada INTEGER NOT NULL DEFAULT 0,
+  anulada_en TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_ventas_fecha ON ventas(fecha);
 
@@ -87,6 +89,7 @@ CREATE TABLE IF NOT EXISTS fiado (
   concepto TEXT,
   usuario_id INTEGER,
   estado TEXT NOT NULL DEFAULT 'pendiente',
+  venta_id INTEGER,
   fecha TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_fiado_cliente ON fiado(cliente_id);
@@ -97,6 +100,7 @@ CREATE TABLE IF NOT EXISTS pagos_fiado (
   monto REAL NOT NULL,
   metodo_pago TEXT NOT NULL DEFAULT 'Efectivo',
   usuario_id INTEGER,
+  anulado INTEGER NOT NULL DEFAULT 0,
   fecha TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_pagos_fiado_fecha ON pagos_fiado(fecha);
@@ -161,6 +165,10 @@ function getConfig() {
     try { config[f.clave] = JSON.parse(f.valor) } catch { config[f.clave] = f.valor }
   })
   if (config.umbral_stock_bajo === undefined) config.umbral_stock_bajo = 5
+  // Prendido de fábrica: sin este valor `tocaRespaldar()` devolvía false y la
+  // bodega trabajaba meses sin un solo respaldo salvo que alguien entrara a
+  // Ajustes a activarlo. El respaldo que hay que pedir no protege a nadie.
+  if (config.respaldo_frecuencia === undefined) config.respaldo_frecuencia = 'diario'
   return config
 }
 
@@ -172,10 +180,29 @@ async function updateConfig(config) {
 }
 
 // ─── INIT + MIGRACIÓN ───────────────────────────────────────────────
+// `CREATE TABLE IF NOT EXISTS` no agrega columnas a una tabla que ya existe, así
+// que las columnas nuevas hay que sumarlas a mano en las bodegas que ya venían
+// usando la app. Se comprueba una por una porque SQLite no tiene "ADD COLUMN IF
+// NOT EXISTS".
+const COLUMNAS_NUEVAS = [
+  ['ventas', 'anulada', 'INTEGER NOT NULL DEFAULT 0'],
+  ['ventas', 'anulada_en', 'TEXT'],
+  ['fiado', 'venta_id', 'INTEGER'],
+  ['pagos_fiado', 'anulado', 'INTEGER NOT NULL DEFAULT 0'],
+]
+
+function agregarColumnasFaltantes() {
+  COLUMNAS_NUEVAS.forEach(([tabla, columna, tipo]) => {
+    const existe = sql.getAllSync(`PRAGMA table_info(${tabla})`).some(c => c.name === columna)
+    if (!existe) sql.execSync(`ALTER TABLE ${tabla} ADD COLUMN ${columna} ${tipo}`)
+  })
+}
+
 async function initDB() {
   if (sql) return
   sql = SQLite.openDatabaseSync(DB_NAME)
   sql.execSync(ESQUEMA)
+  agregarColumnasFaltantes()
   if (!leerConfig('migrado_desde_asyncstorage', false)) {
     await migrarDesdeAsyncStorage()
   }
@@ -475,7 +502,7 @@ function getMasVendidos(limite = 12, dias = 30) {
     FROM detalle_ventas d
     JOIN ventas v ON v.id = d.venta_id
     JOIN productos p ON p.id = d.producto_id
-    WHERE v.fecha >= ?
+    WHERE v.fecha >= ? AND v.anulada = 0
     GROUP BY p.id
     ORDER BY veces DESC
     LIMIT ?
@@ -539,18 +566,18 @@ function getFiadoCliente(clienteId) {
   const fiados = sql.getAllSync('SELECT * FROM fiado WHERE cliente_id = ? ORDER BY fecha DESC', clienteId)
   if (!fiados.length) return []
   const pagos = sql.getAllSync(
-    `SELECT * FROM pagos_fiado WHERE fiado_id IN (${fiados.map(() => '?').join(',')})`,
+    `SELECT * FROM pagos_fiado WHERE anulado = 0 AND fiado_id IN (${fiados.map(() => '?').join(',')})`,
     ...fiados.map(f => f.id))
   return fiados.map(f => ({ ...f, pagos: pagos.filter(p => p.fiado_id === f.id) }))
 }
 
-function insertarFiado({ clienteId, monto, concepto, usuarioId }) {
+function insertarFiado({ clienteId, monto, concepto, usuarioId, ventaId = null }) {
   const fecha = new Date().toISOString()
   const m = parseFloat(monto)
   const r = sql.runSync(
-    'INSERT INTO fiado (cliente_id, monto_original, saldo, concepto, usuario_id, estado, fecha) VALUES (?, ?, ?, ?, ?, ?, ?)',
-    clienteId, m, m, concepto || 'Compra al crédito', usuarioId || null, 'pendiente', fecha)
-  return { id: r.lastInsertRowId, cliente_id: clienteId, monto_original: m, saldo: m, concepto, usuario_id: usuarioId || null, estado: 'pendiente', fecha }
+    'INSERT INTO fiado (cliente_id, monto_original, saldo, concepto, usuario_id, estado, venta_id, fecha) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+    clienteId, m, m, concepto || 'Compra al crédito', usuarioId || null, 'pendiente', ventaId, fecha)
+  return { id: r.lastInsertRowId, cliente_id: clienteId, monto_original: m, saldo: m, concepto, usuario_id: usuarioId || null, estado: 'pendiente', venta_id: ventaId, fecha }
 }
 
 async function addFiado(args) { return insertarFiado(args) }
@@ -631,7 +658,7 @@ async function realizarVenta(items, montoRecibido, metodoPago = 'Efectivo', desc
 
     if (esFiado && clienteId) {
       const concepto = items.map(i => i.tipo_venta === 'granel' ? `${i.nombre} ${i.cantidad}${i.unidad}` : `${i.nombre} x${i.cantidad}`).join(', ')
-      insertarFiado({ clienteId, monto: total, concepto, usuarioId })
+      insertarFiado({ clienteId, monto: total, concepto, usuarioId, ventaId })
     }
   })
 
@@ -641,6 +668,75 @@ async function realizarVenta(items, montoRecibido, metodoPago = 'Efectivo', desc
     metodoPago: esFiado ? 'Fiado' : metodoPago,
     fecha,
   }
+}
+
+// ─── CORREGIR LO YA REGISTRADO ──────────────────────────────────────
+// Equivocarse es parte del mostrador: se marcó 2 y era 1, el cliente devolvió
+// el producto, se tocó Yape y pagaron en efectivo. Sin poder corregir, la caja
+// no cuadra nunca y el stock se desvía solo. La venta anulada NO se borra:
+// queda a la vista marcada, porque lo que se revisa después es justamente qué
+// se anuló y cuándo.
+async function anularVenta(ventaId, usuarioId = null) {
+  const venta = sql.getFirstSync('SELECT * FROM ventas WHERE id = ?', ventaId)
+  if (!venta) return { success: false, error: 'Esa venta ya no existe.' }
+  if (venta.anulada) return { success: false, error: 'Esa venta ya estaba anulada.' }
+
+  const fiado = venta.es_fiado
+    ? sql.getFirstSync('SELECT * FROM fiado WHERE venta_id = ?', ventaId)
+    : null
+
+  // Un fiado con abonos ya movió plata real: anular la venta dejaría esos
+  // abonos apuntando a una deuda que no existe. Primero se anulan los abonos.
+  if (fiado && fiado.saldo < fiado.monto_original) {
+    return { success: false, error: 'Ese fiado ya tiene abonos cobrados. Anula primero los abonos desde la ficha del cliente.' }
+  }
+
+  sql.withTransactionSync(() => {
+    sql.getAllSync('SELECT producto_id, cantidad FROM detalle_ventas WHERE venta_id = ?', ventaId)
+      .filter(d => d.producto_id)
+      .forEach(d => sql.runSync('UPDATE productos SET stock = stock + ? WHERE id = ?', parseFloat(d.cantidad), d.producto_id))
+
+    if (fiado) sql.runSync('DELETE FROM fiado WHERE id = ?', fiado.id)
+
+    sql.runSync('UPDATE ventas SET anulada = 1, anulada_en = ?, usuario_id = COALESCE(?, usuario_id) WHERE id = ?',
+      new Date().toISOString(), usuarioId, ventaId)
+  })
+
+  return { success: true, devolvioStock: true, borroFiado: !!fiado }
+}
+
+// El error más común y el que más descuadra la caja: cobrar en efectivo y
+// marcar Yape (o al revés). No cambia el monto, solo dónde entró la plata.
+async function cambiarMetodoPago(ventaId, metodo) {
+  const venta = sql.getFirstSync('SELECT * FROM ventas WHERE id = ?', ventaId)
+  if (!venta) return { success: false, error: 'Esa venta ya no existe.' }
+  if (venta.anulada) return { success: false, error: 'Esa venta está anulada.' }
+  if (venta.es_fiado) return { success: false, error: 'Un fiado no cambia de método acá: se cobra desde la ficha del cliente.' }
+  if (metodo === venta.metodo_pago) return { success: true }
+
+  // El vuelto solo tiene sentido en efectivo; al pasar a digital deja de
+  // aplicar y guardarlo confundiría el detalle de la venta.
+  const enEfectivo = metodo === 'Efectivo'
+  sql.runSync('UPDATE ventas SET metodo_pago = ?, monto_recibido = ?, vuelto = ? WHERE id = ?',
+    metodo, enEfectivo ? venta.total : 0, 0, ventaId)
+  return { success: true }
+}
+
+async function anularPagoFiado(pagoId) {
+  const pago = sql.getFirstSync('SELECT * FROM pagos_fiado WHERE id = ?', pagoId)
+  if (!pago) return { success: false, error: 'Ese abono ya no existe.' }
+  if (pago.anulado) return { success: false, error: 'Ese abono ya estaba anulado.' }
+
+  const f = sql.getFirstSync('SELECT * FROM fiado WHERE id = ?', pago.fiado_id)
+  if (!f) return { success: false, error: 'La deuda de ese abono ya no existe.' }
+
+  sql.withTransactionSync(() => {
+    sql.runSync('UPDATE pagos_fiado SET anulado = 1 WHERE id = ?', pagoId)
+    const saldo = Math.min(f.saldo + pago.monto, f.monto_original)
+    sql.runSync('UPDATE fiado SET saldo = ?, estado = ? WHERE id = ?', saldo, saldo > 0 ? 'pendiente' : 'pagado', f.id)
+  })
+
+  return { success: true }
 }
 
 function getHistorialVentas() {
@@ -690,13 +786,15 @@ function getDetalleVenta(ventaId) {
 
 function resumenEntre(desdeISO, hastaISO) {
   const filtroVentas = hastaISO ? 'fecha >= ? AND fecha < ?' : 'fecha >= ?'
+  const vigentes = `${filtroVentas} AND anulada = 0`
+  const abonosVigentes = `${filtroVentas} AND anulado = 0`
   const args = hastaISO ? [desdeISO, hastaISO] : [desdeISO]
 
   const v = sql.getFirstSync(
     `SELECT COUNT(*) AS total_ventas, COALESCE(SUM(CASE WHEN es_fiado = 0 THEN total ELSE 0 END), 0) AS ingresos
-     FROM ventas WHERE ${filtroVentas}`, ...args)
+     FROM ventas WHERE ${vigentes}`, ...args)
   const p = sql.getFirstSync(
-    `SELECT COALESCE(SUM(monto), 0) AS abonos FROM pagos_fiado WHERE ${filtroVentas}`, ...args)
+    `SELECT COALESCE(SUM(monto), 0) AS abonos FROM pagos_fiado WHERE ${abonosVigentes}`, ...args)
 
   return { total_ventas: v.total_ventas, ingresos: v.ingresos + p.abonos }
 }
@@ -727,11 +825,11 @@ function resumenCobros(desde, hasta = null) {
 
   const ventas = sql.getAllSync(
     `SELECT metodo_pago, COUNT(*) AS cantidad, COALESCE(SUM(total), 0) AS monto
-     FROM ventas WHERE ${rango} GROUP BY metodo_pago`, ...args)
+     FROM ventas WHERE ${rango} AND anulada = 0 GROUP BY metodo_pago`, ...args)
 
   const abonos = sql.getAllSync(
     `SELECT metodo_pago, COUNT(*) AS cantidad, COALESCE(SUM(monto), 0) AS monto
-     FROM pagos_fiado WHERE ${rango} GROUP BY metodo_pago`, ...args)
+     FROM pagos_fiado WHERE ${rango} AND anulado = 0 GROUP BY metodo_pago`, ...args)
 
   const porMetodo = {}
   const acumular = (metodo, cantidad, monto) => {
@@ -937,7 +1035,8 @@ export default {
   getCategoriasCustom, addCategoriaCustom,
   getConfig, updateConfig, getBackupJSON, restaurarBackup, validarBackup,
   getClientes, addCliente, updateCliente, buscarCliente,
-  getFiadoCliente, addFiado, pagarFiado, getResumenFiado, getFiadosAntiguos,
+  getFiadoCliente, addFiado, pagarFiado, getResumenFiado, getFiadosAntiguos, anularPagoFiado,
   realizarVenta, getHistorialVentas, getDetalleVenta, getResumenHoy, getResumenPeriodo,
+  anularVenta, cambiarMetodoPago,
   getEstadoCaja, getSesionAbierta, abrirCaja, cerrarCaja, getSesionesCaja,
 }

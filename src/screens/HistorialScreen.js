@@ -11,6 +11,7 @@ import { useSesion } from '../context/SesionContext'
 const fmt = (n) => `S/ ${Number(n).toFixed(2)}`
 const hora = (iso) => new Date(iso).toLocaleTimeString('es-PE', { hour: '2-digit', minute: '2-digit' })
 const FONDOS_RAPIDOS = [0, 20, 50, 100]
+const METODOS_COBRO = ['Efectivo', 'Yape', 'Plin']
 const ICONO = { Efectivo: '💵', Yape: '📱', Plin: '📲', Fiado: '📋' }
 const PERIODOS = [
   { id: 'hoy', label: 'Hoy' },
@@ -96,6 +97,46 @@ export default function HistorialScreen() {
         ? `Sobran ${fmt(r.diferencia)} respecto a lo esperado.`
         : `Faltan ${fmt(Math.abs(r.diferencia))} respecto a lo esperado.`
     Alert.alert('✓ Caja cerrada', `${detalle}\n\nEsperado ${fmt(r.esperado)} · contado ${fmt(r.contado)}`)
+  }
+
+  // Solo tiene sentido corregir un cobro que entró: un fiado no se cobró
+  // todavía, y una venta anulada ya no cuenta en ningún total.
+  const puedeCorregir = ventaSel && ventaSel.tipo !== 'pago_fiado' && !ventaSel.es_fiado && !ventaSel.anulada
+
+  function recargar() {
+    setVentas(db.getHistorialVentas())
+    setCaja(db.getEstadoCaja())
+    cargarResumen(periodo)
+  }
+
+  async function corregirMetodo(metodo) {
+    const r = await db.cambiarMetodoPago(ventaSel.id, metodo)
+    if (!r.success) { Alert.alert('No se pudo corregir', r.error); return }
+    setVentaSel(v => ({ ...v, metodo_pago: metodo }))
+    recargar()
+  }
+
+  function confirmarAnular() {
+    Alert.alert(
+      '¿Anular esta venta?',
+      `Se devuelve el stock de los productos y la venta deja de contar en los totales y en la caja.\n\n${
+        ventaSel.es_fiado ? 'También se borra la deuda que generó.\n\n' : ''
+      }La venta queda a la vista, marcada como anulada.`,
+      [
+        { text: 'Cancelar', style: 'cancel' },
+        {
+          text: 'Anular',
+          style: 'destructive',
+          onPress: async () => {
+            const r = await db.anularVenta(ventaSel.id, usuario?.id)
+            if (!r.success) { Alert.alert('No se pudo anular', r.error); return }
+            setVentaSel(null)
+            recargar()
+            Alert.alert('✓ Venta anulada', 'El stock volvió a como estaba y los totales ya no la cuentan.')
+          },
+        },
+      ],
+    )
   }
 
   async function handleCompartir() {
@@ -185,13 +226,14 @@ export default function HistorialScreen() {
         keyExtractor={v => String(v.id)}
         contentContainerStyle={{ padding: 12 }}
         renderItem={({ item }) => (
-          <TouchableOpacity style={styles.fila} onPress={() => setVentaSel(item)}>
+          <TouchableOpacity style={[styles.fila, !!item.anulada && styles.filaAnulada]} onPress={() => setVentaSel(item)}>
             <View style={{ flex: 1 }}>
               <Text style={styles.venta}>{item.tipo === 'pago_fiado' ? 'Abono fiado' : `Venta #${item.id}`} {ICONO[item.metodo_pago] || ''} {item.metodo_pago}</Text>
               <Text style={styles.fecha}>{new Date(item.fecha).toLocaleString('es-PE')}</Text>
               {item.nombre_cliente && <Text style={styles.cliente}>{item.nombre_cliente}</Text>}
+              {!!item.anulada && <Text style={styles.etiquetaAnulada}>🚫 Anulada</Text>}
             </View>
-            <Text style={styles.total}>{fmt(item.total)}</Text>
+            <Text style={[styles.total, !!item.anulada && styles.totalAnulado]}>{fmt(item.total)}</Text>
           </TouchableOpacity>
         )}
         ListEmptyComponent={<Text style={styles.vacio}>{metodoFiltro ? `No hay ventas con ${metodoFiltro}.` : 'Todavía no hay ventas registradas.'}</Text>}
@@ -361,6 +403,7 @@ export default function HistorialScreen() {
                 <Text style={styles.modalTitulo}>{ventaSel.tipo === 'pago_fiado' ? 'Abono fiado' : `Venta #${ventaSel.id}`} {ICONO[ventaSel.metodo_pago] || ''} {ventaSel.metodo_pago}</Text>
                 <Text style={styles.modalFecha}>{new Date(ventaSel.fecha).toLocaleString('es-PE')}</Text>
                 {ventaSel.nombre_cliente && <Text style={styles.modalCliente}>Cliente: {ventaSel.nombre_cliente}</Text>}
+                {!!ventaSel.anulada && <Text style={styles.avisoAnulada}>🚫 Venta anulada — no cuenta en los totales</Text>}
 
                 <ScrollView style={{ marginTop: 12, marginBottom: 8 }}>
                   {(ventaSel.items || []).map(it => (
@@ -397,6 +440,27 @@ export default function HistorialScreen() {
                   </>
                 )}
 
+                {/* Corregir el método es el arreglo más pedido: se cobró en
+                    efectivo y se marcó Yape, y con eso el cierre ya no cuadra. */}
+                {puedeCorregir && (
+                  <>
+                    <Text style={styles.etiqueta}>Me pagaron con</Text>
+                    <View style={styles.metodosCorregir}>
+                      {METODOS_COBRO.map(m => (
+                        <TouchableOpacity
+                          key={m}
+                          onPress={() => corregirMetodo(m)}
+                          style={[styles.metodoChip, ventaSel.metodo_pago === m && styles.metodoChipActivo]}
+                        >
+                          <Text style={[styles.metodoChipTexto, ventaSel.metodo_pago === m && styles.metodoChipTextoActivo]}>
+                            {ICONO[m]} {m}
+                          </Text>
+                        </TouchableOpacity>
+                      ))}
+                    </View>
+                  </>
+                )}
+
                 <View style={styles.filaBotones}>
                   <TouchableOpacity style={styles.botonGhost} onPress={() => setVentaSel(null)}>
                     <Text style={styles.botonGhostTexto}>Cerrar</Text>
@@ -405,6 +469,12 @@ export default function HistorialScreen() {
                     <Text style={styles.botonPrimarioTexto}>{compartiendo ? 'Generando...' : '📄 Compartir ticket'}</Text>
                   </TouchableOpacity>
                 </View>
+
+                {ventaSel.tipo !== 'pago_fiado' && !ventaSel.anulada && (
+                  <TouchableOpacity style={styles.botonAnular} onPress={confirmarAnular}>
+                    <Text style={styles.botonAnularTexto}>🚫  Anular esta venta</Text>
+                  </TouchableOpacity>
+                )}
               </>
             )}
           </View>
@@ -447,6 +517,18 @@ const styles = StyleSheet.create({
   sesionDetalle: { color: colors.textMuted, fontSize: 12 },
   sesionNota: { color: colors.textMuted, fontSize: 12, fontStyle: 'italic', marginTop: 2 },
   modalScrollLimite: { flexGrow: 0, maxHeight: '85%' },
+
+  avisoAnulada: { color: colors.danger, fontWeight: '700', fontSize: 13, marginTop: 6 },
+  filaAnulada: { opacity: 0.55, borderStyle: 'dashed' },
+  etiquetaAnulada: { color: colors.danger, fontWeight: '700', fontSize: 11, marginTop: 3 },
+  totalAnulado: { textDecorationLine: 'line-through', color: colors.textMuted },
+  metodosCorregir: { flexDirection: 'row', gap: 8, marginTop: 4 },
+  metodoChip: { flex: 1, paddingVertical: 10, borderRadius: 10, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.input, alignItems: 'center' },
+  metodoChipActivo: { borderColor: colors.primary, backgroundColor: colors.accentBg },
+  metodoChipTexto: { color: colors.textMuted, fontWeight: '600', fontSize: 13 },
+  metodoChipTextoActivo: { color: colors.accent, fontWeight: '700' },
+  botonAnular: { marginTop: 10, paddingVertical: 12, borderRadius: 10, borderWidth: 1, borderColor: colors.danger, alignItems: 'center' },
+  botonAnularTexto: { color: colors.danger, fontWeight: '700', fontSize: 13 },
   cierreCajon: { marginTop: 12, marginBottom: 4, padding: 14, borderRadius: 12, backgroundColor: colors.accentBg, borderWidth: 1, borderColor: colors.primary },
   cierreCajonLabel: { color: colors.textMuted, fontSize: 13, marginBottom: 4 },
   cierreCajonValor: { color: colors.accent, fontWeight: '800', fontSize: 26 },
