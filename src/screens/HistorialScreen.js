@@ -1,12 +1,16 @@
 import React, { useState, useCallback } from 'react'
-import { View, Text, FlatList, StyleSheet, TouchableOpacity, Modal, ScrollView, Pressable, Alert } from 'react-native'
+import { View, Text, TextInput, FlatList, StyleSheet, TouchableOpacity, Modal, ScrollView, Pressable, Alert } from 'react-native'
 import { useFocusEffect } from '@react-navigation/native'
 import db from '../data/db'
 import { colors } from '../theme/colors'
 import { chips } from '../theme/chips'
 import { compartirTicket } from '../utils/ticket'
+import { usePieDeHoja } from '../utils/teclado'
+import { useSesion } from '../context/SesionContext'
 
 const fmt = (n) => `S/ ${Number(n).toFixed(2)}`
+const hora = (iso) => new Date(iso).toLocaleTimeString('es-PE', { hour: '2-digit', minute: '2-digit' })
+const FONDOS_RAPIDOS = [0, 20, 50, 100]
 const ICONO = { Efectivo: '💵', Yape: '📱', Plin: '📲', Fiado: '📋' }
 const PERIODOS = [
   { id: 'hoy', label: 'Hoy' },
@@ -15,16 +19,26 @@ const PERIODOS = [
 ]
 
 export default function HistorialScreen() {
+  const { usuario } = useSesion()
+  const { alturaTeclado, espacioAbajo } = usePieDeHoja()
   const [ventas, setVentas] = useState([])
   const [resumen, setResumen] = useState({ total_ventas: 0, ingresos: 0 })
   const [periodo, setPeriodo] = useState('hoy')
   const [metodoFiltro, setMetodoFiltro] = useState(null)
   const [ventaSel, setVentaSel] = useState(null)
-  const [cierre, setCierre] = useState(null)
   const [compartiendo, setCompartiendo] = useState(false)
+
+  const [caja, setCaja] = useState(null)
+  const [vistaCaja, setVistaCaja] = useState(null)
+  const [fondoInicial, setFondoInicial] = useState('')
+  const [efectivoContado, setEfectivoContado] = useState('')
+  const [notaCierre, setNotaCierre] = useState('')
+  const [guardandoCaja, setGuardandoCaja] = useState(false)
+  const [sesiones, setSesiones] = useState([])
 
   useFocusEffect(useCallback(() => {
     setVentas(db.getHistorialVentas())
+    setCaja(db.getEstadoCaja())
     cargarResumen(periodo)
   }, [periodo]))
 
@@ -34,7 +48,55 @@ export default function HistorialScreen() {
     else setResumen(db.getResumenPeriodo(30))
   }
 
-  function abrirCierre() { setCierre(db.getCierreCaja()) }
+  function cerrarVistaCaja() {
+    setVistaCaja(null)
+    setFondoInicial('')
+    setEfectivoContado('')
+    setNotaCierre('')
+  }
+
+  function abrirVistaCierre() {
+    // Se releen los totales al abrir: entre que se cargó la pantalla y este
+    // momento pudo entrar otra venta, y el cuadre tiene que ser del instante.
+    setCaja(db.getEstadoCaja())
+    setEfectivoContado('')
+    setNotaCierre('')
+    setVistaCaja('cierre')
+  }
+
+  function abrirHistorialCaja() {
+    setSesiones(db.getSesionesCaja())
+    setVistaCaja('historial')
+  }
+
+  async function confirmarApertura() {
+    setGuardandoCaja(true)
+    const r = await db.abrirCaja({ fondoInicial: fondoInicial || 0, usuarioId: usuario?.id })
+    setGuardandoCaja(false)
+    if (!r.success) { Alert.alert('No se pudo abrir', r.error); return }
+    setCaja(db.getEstadoCaja())
+    cerrarVistaCaja()
+  }
+
+  // La diferencia se calcula mientras el dueño teclea: ver "faltan S/ 3" en el
+  // momento le da la chance de volver a contar antes de dejarlo asentado.
+  const contadoNum = parseFloat(efectivoContado)
+  const diferencia = isNaN(contadoNum) ? null : Math.round((contadoNum - (caja?.esperado_en_cajon || 0)) * 100) / 100
+
+  async function confirmarCierre() {
+    setGuardandoCaja(true)
+    const r = await db.cerrarCaja({ efectivoContado, nota: notaCierre, usuarioId: usuario?.id })
+    setGuardandoCaja(false)
+    if (!r.success) { Alert.alert('No se pudo cerrar', r.error); return }
+    setCaja(db.getEstadoCaja())
+    cerrarVistaCaja()
+    const detalle = r.diferencia === 0
+      ? 'La caja cuadró exacta.'
+      : r.diferencia > 0
+        ? `Sobran ${fmt(r.diferencia)} respecto a lo esperado.`
+        : `Faltan ${fmt(Math.abs(r.diferencia))} respecto a lo esperado.`
+    Alert.alert('✓ Caja cerrada', `${detalle}\n\nEsperado ${fmt(r.esperado)} · contado ${fmt(r.contado)}`)
+  }
 
   async function handleCompartir() {
     setCompartiendo(true)
@@ -87,9 +149,36 @@ export default function HistorialScreen() {
         </View>
       </View>
 
-      <TouchableOpacity style={styles.botonCierre} onPress={abrirCierre}>
-        <Text style={styles.botonCierreTexto}>🧮  Cierre de caja de hoy</Text>
-      </TouchableOpacity>
+      <View style={[styles.tarjetaCaja, caja?.abierta && styles.tarjetaCajaAbierta]}>
+        {caja?.abierta ? (
+          <>
+            <Text style={styles.cajaEstado}>🟢  Caja abierta desde las {hora(caja.desde)}</Text>
+            <Text style={styles.cajaDetalle}>
+              Empezaste con {fmt(caja.fondo_inicial)} · en el cajón debería haber{' '}
+              <Text style={styles.cajaMonto}>{fmt(caja.esperado_en_cajon)}</Text>
+            </Text>
+          </>
+        ) : (
+          <>
+            <Text style={styles.cajaEstado}>⚪  Caja cerrada</Text>
+            <Text style={styles.cajaDetalle}>Ábrela al empezar el día con el sencillo que dejas en el cajón, y al cerrar la app te dice si cuadra.</Text>
+          </>
+        )}
+        <View style={styles.cajaBotones}>
+          <TouchableOpacity style={styles.botonGhost} onPress={abrirHistorialCaja}>
+            <Text style={styles.botonGhostTexto}>Cierres anteriores</Text>
+          </TouchableOpacity>
+          {caja?.abierta ? (
+            <TouchableOpacity style={styles.botonPrimario} onPress={abrirVistaCierre}>
+              <Text style={styles.botonPrimarioTexto}>🧮  Cerrar caja</Text>
+            </TouchableOpacity>
+          ) : (
+            <TouchableOpacity style={styles.botonPrimario} onPress={() => { setFondoInicial(''); setVistaCaja('apertura') }}>
+              <Text style={styles.botonPrimarioTexto}>🔓  Abrir caja</Text>
+            </TouchableOpacity>
+          )}
+        </View>
+      </View>
 
       <FlatList
         data={ventasFiltradas}
@@ -108,58 +197,165 @@ export default function HistorialScreen() {
         ListEmptyComponent={<Text style={styles.vacio}>{metodoFiltro ? `No hay ventas con ${metodoFiltro}.` : 'Todavía no hay ventas registradas.'}</Text>}
       />
 
-      <Modal visible={!!cierre} transparent animationType="slide" onRequestClose={() => setCierre(null)}>
-        <View style={styles.modalFondo}>
-          <Pressable style={StyleSheet.absoluteFill} onPress={() => setCierre(null)} />
-          <View style={[styles.modalCaja, { maxHeight: '85%' }]}>
-            {cierre && (
-              <>
-                <Text style={styles.modalTitulo}>🧮 Cierre de caja</Text>
-                <Text style={styles.modalFecha}>{new Date().toLocaleDateString('es-PE')} · {cierre.total_ventas} ventas</Text>
+      <Modal visible={vistaCaja === 'apertura'} transparent animationType="slide" onRequestClose={cerrarVistaCaja}>
+        <View style={[styles.modalFondo, { paddingBottom: alturaTeclado }]}>
+          <Pressable style={StyleSheet.absoluteFill} onPress={cerrarVistaCaja} />
+          <ScrollView style={styles.modalScrollLimite} contentContainerStyle={[styles.modalCaja, { paddingBottom: 20 + espacioAbajo }]} keyboardShouldPersistTaps="handled">
+            <Text style={styles.modalTitulo}>🔓 Abrir caja</Text>
+            <Text style={styles.modalFecha}>¿Con cuánto sencillo empiezas? Es lo que hay en el cajón antes de la primera venta.</Text>
 
-                <ScrollView style={{ marginTop: 12 }}>
-                  {cierre.metodos.length === 0 && <Text style={styles.vacio}>Todavía no se cobró nada hoy.</Text>}
-                  {cierre.metodos.map(m => (
-                    <View key={m.metodo} style={styles.filaTotalLinea}>
-                      <Text style={styles.itemNombre}>{ICONO[m.metodo] || ''} {m.metodo} ({m.cantidad})</Text>
-                      <Text style={styles.itemSubtotal}>{fmt(m.monto)}</Text>
-                    </View>
-                  ))}
-                </ScrollView>
+            <View style={styles.atajosFondo}>
+              {FONDOS_RAPIDOS.map(v => (
+                <TouchableOpacity key={v} style={styles.atajoFondo} onPress={() => setFondoInicial(String(v))}>
+                  <Text style={styles.atajoFondoTexto}>{v === 0 ? 'Sin fondo' : `S/ ${v}`}</Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+
+            <TextInput
+              style={styles.input}
+              placeholder="S/ 0.00"
+              placeholderTextColor={colors.placeholder}
+              keyboardType="decimal-pad"
+              value={fondoInicial}
+              onChangeText={setFondoInicial}
+            />
+
+            <View style={styles.filaBotones}>
+              <TouchableOpacity style={styles.botonGhost} onPress={cerrarVistaCaja}>
+                <Text style={styles.botonGhostTexto}>Cancelar</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={styles.botonPrimario} onPress={confirmarApertura} disabled={guardandoCaja}>
+                <Text style={styles.botonPrimarioTexto}>{guardandoCaja ? 'Abriendo...' : 'Abrir caja'}</Text>
+              </TouchableOpacity>
+            </View>
+          </ScrollView>
+        </View>
+      </Modal>
+
+      <Modal visible={vistaCaja === 'cierre'} transparent animationType="slide" onRequestClose={cerrarVistaCaja}>
+        <View style={[styles.modalFondo, { paddingBottom: alturaTeclado }]}>
+          <Pressable style={StyleSheet.absoluteFill} onPress={cerrarVistaCaja} />
+          <ScrollView style={styles.modalScrollLimite} contentContainerStyle={[styles.modalCaja, { paddingBottom: 20 + espacioAbajo }]} keyboardShouldPersistTaps="handled">
+            {caja?.abierta && (
+              <>
+                <Text style={styles.modalTitulo}>🧮 Cerrar caja</Text>
+                <Text style={styles.modalFecha}>
+                  Abierta a las {hora(caja.desde)} · {caja.total_ventas} {caja.total_ventas === 1 ? 'venta' : 'ventas'}
+                </Text>
+
+                <View style={styles.filaTotalLinea}>
+                  <Text style={styles.itemNombre}>Fondo con el que abriste</Text>
+                  <Text style={styles.itemSubtotal}>{fmt(caja.fondo_inicial)}</Text>
+                </View>
+                {caja.metodos.map(m => (
+                  <View key={m.metodo} style={styles.filaTotalLinea}>
+                    <Text style={styles.itemNombre}>{ICONO[m.metodo] || ''} {m.metodo} ({m.cantidad})</Text>
+                    <Text style={styles.itemSubtotal}>{fmt(m.monto)}</Text>
+                  </View>
+                ))}
+                {caja.fiado_otorgado > 0 && (
+                  <View style={styles.filaTotalLinea}>
+                    <Text style={styles.textoMuted}>Fiado entregado (no entró a la caja)</Text>
+                    <Text style={styles.textoFiado}>{fmt(caja.fiado_otorgado)}</Text>
+                  </View>
+                )}
 
                 <View style={styles.cierreCajon}>
                   <Text style={styles.cierreCajonLabel}>💵 En el cajón debería haber</Text>
-                  <Text style={styles.cierreCajonValor}>{fmt(cierre.efectivo)}</Text>
+                  <Text style={styles.cierreCajonValor}>{fmt(caja.esperado_en_cajon)}</Text>
                 </View>
 
-                <View style={styles.filaTotalLinea}>
-                  <Text style={styles.textoMuted}>Cobrado en digital (Yape/Plin)</Text>
-                  <Text style={styles.textoMuted}>{fmt(cierre.digital)}</Text>
-                </View>
-                {cierre.fiado_otorgado > 0 && (
-                  <View style={styles.filaTotalLinea}>
-                    <Text style={styles.textoMuted}>Fiado entregado hoy (no cobrado)</Text>
-                    <Text style={styles.textoFiado}>{fmt(cierre.fiado_otorgado)}</Text>
-                  </View>
+                <Text style={styles.etiqueta}>¿Cuánto contaste realmente?</Text>
+                <TextInput
+                  style={styles.input}
+                  placeholder="S/ 0.00"
+                  placeholderTextColor={colors.placeholder}
+                  keyboardType="decimal-pad"
+                  value={efectivoContado}
+                  onChangeText={setEfectivoContado}
+                />
+
+                {diferencia !== null && (
+                  <Text style={diferencia === 0 ? styles.diferenciaOk : styles.diferenciaMal}>
+                    {diferencia === 0
+                      ? '✓ Cuadra exacto'
+                      : diferencia > 0
+                        ? `Sobran ${fmt(diferencia)}`
+                        : `Faltan ${fmt(Math.abs(diferencia))}`}
+                  </Text>
                 )}
-                <View style={styles.filaTotalLinea}>
-                  <Text style={styles.totalGrandeLabel}>TOTAL COBRADO</Text>
-                  <Text style={styles.totalGrande}>{fmt(cierre.total_cobrado)}</Text>
-                </View>
 
-                <TouchableOpacity style={[styles.botonGhost, { flex: 0, marginTop: 14 }]} onPress={() => setCierre(null)}>
-                  <Text style={styles.botonGhostTexto}>Cerrar</Text>
-                </TouchableOpacity>
+                {diferencia !== null && diferencia !== 0 && (
+                  <TextInput
+                    style={[styles.input, styles.inputNota]}
+                    placeholder="¿Sabes por qué no cuadra? (opcional)"
+                    placeholderTextColor={colors.placeholder}
+                    multiline
+                    value={notaCierre}
+                    onChangeText={setNotaCierre}
+                  />
+                )}
+
+                <View style={styles.filaBotones}>
+                  <TouchableOpacity style={styles.botonGhost} onPress={cerrarVistaCaja}>
+                    <Text style={styles.botonGhostTexto}>Todavía no</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={[styles.botonPrimario, diferencia === null && styles.botonDeshabilitado]}
+                    onPress={confirmarCierre}
+                    disabled={diferencia === null || guardandoCaja}
+                  >
+                    <Text style={styles.botonPrimarioTexto}>{guardandoCaja ? 'Cerrando...' : 'Cerrar caja'}</Text>
+                  </TouchableOpacity>
+                </View>
+                {diferencia === null && (
+                  <Text style={styles.motivoBloqueo}>Cuenta el efectivo del cajón y escríbelo para cerrar.</Text>
+                )}
               </>
             )}
-          </View>
+          </ScrollView>
+        </View>
+      </Modal>
+
+      <Modal visible={vistaCaja === 'historial'} transparent animationType="slide" onRequestClose={cerrarVistaCaja}>
+        <View style={styles.modalFondo}>
+          <Pressable style={StyleSheet.absoluteFill} onPress={cerrarVistaCaja} />
+          <ScrollView style={styles.modalScrollLimite} contentContainerStyle={[styles.modalCaja, { paddingBottom: 20 + espacioAbajo }]}>
+            <Text style={styles.modalTitulo}>Cierres anteriores</Text>
+            {sesiones.length === 0 && <Text style={styles.vacio}>Todavía no has cerrado ninguna caja.</Text>}
+            {sesiones.map(s => (
+              <View key={s.id} style={styles.filaSesion}>
+                <View style={styles.filaSesionCabecera}>
+                  <Text style={styles.sesionFecha}>{new Date(s.abierta_en).toLocaleDateString('es-PE')}</Text>
+                  <Text style={s.diferencia === 0 ? styles.sesionOk : styles.sesionMal}>
+                    {s.diferencia === 0
+                      ? 'Cuadró'
+                      : s.diferencia > 0 ? `Sobró ${fmt(s.diferencia)}` : `Faltó ${fmt(Math.abs(s.diferencia))}`}
+                  </Text>
+                </View>
+                <Text style={styles.sesionDetalle}>
+                  {hora(s.abierta_en)} a {hora(s.cerrada_en)} · esperado {fmt(s.efectivo_esperado)} · contado {fmt(s.efectivo_contado)}
+                </Text>
+                <Text style={styles.sesionDetalle}>
+                  Fondo {fmt(s.fondo_inicial)}
+                  {s.nombre_apertura ? ` · abrió ${s.nombre_apertura}` : ''}
+                  {s.nombre_cierre ? ` · cerró ${s.nombre_cierre}` : ''}
+                </Text>
+                {s.nota && <Text style={styles.sesionNota}>“{s.nota}”</Text>}
+              </View>
+            ))}
+            <TouchableOpacity style={[styles.botonGhost, { marginTop: 14 }]} onPress={cerrarVistaCaja}>
+              <Text style={styles.botonGhostTexto}>Cerrar</Text>
+            </TouchableOpacity>
+          </ScrollView>
         </View>
       </Modal>
 
       <Modal visible={!!ventaSel} transparent animationType="slide" onRequestClose={() => setVentaSel(null)}>
         <View style={styles.modalFondo}>
           <Pressable style={StyleSheet.absoluteFill} onPress={() => setVentaSel(null)} />
-          <View style={[styles.modalCaja, { maxHeight: '85%' }]}>
+          <View style={[styles.modalCaja, { maxHeight: '85%', paddingBottom: 20 + espacioAbajo }]}>
             {ventaSel && (
               <>
                 <Text style={styles.modalTitulo}>{ventaSel.tipo === 'pago_fiado' ? 'Abono fiado' : `Venta #${ventaSel.id}`} {ICONO[ventaSel.metodo_pago] || ''} {ventaSel.metodo_pago}</Text>
@@ -225,8 +421,32 @@ const styles = StyleSheet.create({
   periodoChipActivo: { backgroundColor: colors.accentBg, borderColor: colors.primary },
   periodoTexto: { color: colors.textMuted, fontWeight: '600', fontSize: 13 },
   periodoTextoActivo: { color: colors.accent },
-  botonCierre: { marginHorizontal: 16, marginBottom: 4, paddingVertical: 12, borderRadius: 10, borderWidth: 1, borderColor: colors.borderStrong, backgroundColor: colors.card, alignItems: 'center' },
-  botonCierreTexto: { color: colors.text, fontWeight: '700', fontSize: 14 },
+  tarjetaCaja: { marginHorizontal: 16, marginBottom: 4, padding: 14, borderRadius: 12, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.card, gap: 4 },
+  tarjetaCajaAbierta: { borderColor: colors.primary, backgroundColor: colors.accentBg },
+  cajaEstado: { color: colors.text, fontWeight: '700', fontSize: 14 },
+  cajaDetalle: { color: colors.textMuted, fontSize: 12, lineHeight: 17 },
+  cajaMonto: { color: colors.accent, fontWeight: '700' },
+  cajaBotones: { flexDirection: 'row', gap: 10, marginTop: 10 },
+
+  etiqueta: { color: colors.textMuted, fontSize: 12, fontWeight: '700', textTransform: 'uppercase', letterSpacing: 0.5, marginTop: 14, marginBottom: 6 },
+  input: { backgroundColor: colors.input, borderWidth: 1, borderColor: colors.border, borderRadius: 10, padding: 14, color: colors.text, fontSize: 15, marginTop: 8 },
+  inputNota: { minHeight: 70, textAlignVertical: 'top' },
+  atajosFondo: { flexDirection: 'row', gap: 8, marginTop: 12 },
+  atajoFondo: { flex: 1, paddingVertical: 10, borderRadius: 10, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.input, alignItems: 'center' },
+  atajoFondoTexto: { color: colors.text, fontWeight: '600', fontSize: 13 },
+  diferenciaOk: { color: colors.accent, fontWeight: '800', fontSize: 16, marginTop: 10 },
+  diferenciaMal: { color: colors.danger, fontWeight: '800', fontSize: 16, marginTop: 10 },
+  motivoBloqueo: { color: colors.textMuted, fontSize: 12, textAlign: 'center', marginTop: 10 },
+  botonDeshabilitado: { opacity: 0.5 },
+
+  filaSesion: { paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: colors.border, gap: 3 },
+  filaSesionCabecera: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
+  sesionFecha: { color: colors.text, fontWeight: '700', fontSize: 14 },
+  sesionOk: { color: colors.accent, fontWeight: '700', fontSize: 13 },
+  sesionMal: { color: colors.danger, fontWeight: '700', fontSize: 13 },
+  sesionDetalle: { color: colors.textMuted, fontSize: 12 },
+  sesionNota: { color: colors.textMuted, fontSize: 12, fontStyle: 'italic', marginTop: 2 },
+  modalScrollLimite: { flexGrow: 0, maxHeight: '85%' },
   cierreCajon: { marginTop: 12, marginBottom: 4, padding: 14, borderRadius: 12, backgroundColor: colors.accentBg, borderWidth: 1, borderColor: colors.primary },
   cierreCajonLabel: { color: colors.textMuted, fontSize: 13, marginBottom: 4 },
   cierreCajonValor: { color: colors.accent, fontWeight: '800', fontSize: 26 },

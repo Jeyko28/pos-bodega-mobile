@@ -122,6 +122,20 @@ CREATE TABLE IF NOT EXISTS detalle_ingresos (
 );
 CREATE INDEX IF NOT EXISTS idx_detalle_ingreso ON detalle_ingresos(ingreso_id);
 
+CREATE TABLE IF NOT EXISTS sesiones_caja (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  abierta_en TEXT NOT NULL,
+  cerrada_en TEXT,
+  usuario_apertura_id INTEGER,
+  usuario_cierre_id INTEGER,
+  fondo_inicial REAL NOT NULL DEFAULT 0,
+  efectivo_esperado REAL,
+  efectivo_contado REAL,
+  diferencia REAL,
+  nota TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_sesion_caja_abierta ON sesiones_caja(cerrada_en);
+
 CREATE TABLE IF NOT EXISTS config (
   clave TEXT PRIMARY KEY,
   valor TEXT
@@ -701,23 +715,23 @@ function getResumenPeriodo(dias) {
   return resumenEntre(desde.toISOString(), null)
 }
 
-// Cierre de caja: lo que el dueño revisa en la noche para cuadrar el cajón.
-// Separa por método porque solo el efectivo debería estar físicamente ahí.
-function getCierreCaja() {
-  const inicio = new Date()
-  inicio.setHours(0, 0, 0, 0)
-  const fin = new Date(inicio)
-  fin.setDate(fin.getDate() + 1)
-  const desde = inicio.toISOString()
-  const hasta = fin.toISOString()
+// ─── CAJA (apertura, cuadre y cierre por turno) ─────────────────────
+const redondear = (n) => Math.round(n * 100) / 100
+
+// Lo cobrado en un tramo de tiempo, separado por método: solo el efectivo
+// debería estar físicamente en el cajón. `hasta` en null significa "hasta
+// ahora", que es el caso de una caja todavía abierta.
+function resumenCobros(desde, hasta = null) {
+  const rango = hasta ? 'fecha >= ? AND fecha < ?' : 'fecha >= ?'
+  const args = hasta ? [desde, hasta] : [desde]
 
   const ventas = sql.getAllSync(
     `SELECT metodo_pago, COUNT(*) AS cantidad, COALESCE(SUM(total), 0) AS monto
-     FROM ventas WHERE fecha >= ? AND fecha < ? GROUP BY metodo_pago`, desde, hasta)
+     FROM ventas WHERE ${rango} GROUP BY metodo_pago`, ...args)
 
   const abonos = sql.getAllSync(
     `SELECT metodo_pago, COUNT(*) AS cantidad, COALESCE(SUM(monto), 0) AS monto
-     FROM pagos_fiado WHERE fecha >= ? AND fecha < ? GROUP BY metodo_pago`, desde, hasta)
+     FROM pagos_fiado WHERE ${rango} GROUP BY metodo_pago`, ...args)
 
   const porMetodo = {}
   const acumular = (metodo, cantidad, monto) => {
@@ -728,8 +742,8 @@ function getCierreCaja() {
   ventas.forEach(v => acumular(v.metodo_pago, v.cantidad, v.monto))
   abonos.forEach(a => acumular(a.metodo_pago, a.cantidad, a.monto))
 
-  // Lo fiado hoy no entró a la caja: se muestra aparte para no cuadrarlo con el cajón.
-  const fiadoHoy = porMetodo.Fiado?.monto || 0
+  // Lo fiado no entró a la caja: se muestra aparte para no cuadrarlo con el cajón.
+  const fiado = porMetodo.Fiado?.monto || 0
   delete porMetodo.Fiado
 
   const cobrado = Object.values(porMetodo)
@@ -738,12 +752,81 @@ function getCierreCaja() {
 
   return {
     metodos: cobrado.sort((a, b) => b.monto - a.monto),
-    efectivo,
-    digital,
-    fiado_otorgado: fiadoHoy,
-    total_cobrado: efectivo + digital,
+    efectivo: redondear(efectivo),
+    digital: redondear(digital),
+    fiado_otorgado: redondear(fiado),
+    total_cobrado: redondear(efectivo + digital),
     total_ventas: ventas.reduce((s, v) => s + v.cantidad, 0),
   }
+}
+
+function getSesionAbierta() {
+  return sql.getFirstSync('SELECT * FROM sesiones_caja WHERE cerrada_en IS NULL ORDER BY id DESC') || null
+}
+
+// Lo que la pantalla necesita saber de la caja en un solo llamado. Sin turno
+// abierto se cae al día de hoy: el dueño que nunca abre caja sigue viendo sus
+// números, solo que sin fondo con el cual cuadrar.
+function getEstadoCaja() {
+  const sesion = getSesionAbierta()
+  const inicioHoy = new Date()
+  inicioHoy.setHours(0, 0, 0, 0)
+  const desde = sesion ? sesion.abierta_en : inicioHoy.toISOString()
+  const resumen = resumenCobros(desde)
+  const fondo = sesion ? sesion.fondo_inicial : 0
+
+  return {
+    ...resumen,
+    sesion,
+    abierta: !!sesion,
+    desde,
+    fondo_inicial: fondo,
+    esperado_en_cajon: redondear(fondo + resumen.efectivo),
+  }
+}
+
+async function abrirCaja({ fondoInicial = 0, usuarioId = null }) {
+  if (getSesionAbierta()) return { success: false, error: 'Ya hay una caja abierta.' }
+  const fondo = parseFloat(fondoInicial)
+  if (isNaN(fondo) || fondo < 0) return { success: false, error: 'Escribe con cuánto sencillo empiezas (puede ser 0).' }
+
+  const r = sql.runSync(
+    'INSERT INTO sesiones_caja (abierta_en, usuario_apertura_id, fondo_inicial) VALUES (?, ?, ?)',
+    new Date().toISOString(), usuarioId, redondear(fondo))
+  return { success: true, id: r.lastInsertRowId }
+}
+
+// El cierre guarda las dos cifras — la que la app calculó y la que el dueño
+// contó — y la diferencia entre ambas. Guardar solo el descuadre escondería de
+// dónde salió, que es justo lo que se revisa cuando no cuadra.
+async function cerrarCaja({ efectivoContado, nota = null, usuarioId = null }) {
+  const sesion = getSesionAbierta()
+  if (!sesion) return { success: false, error: 'No hay una caja abierta.' }
+
+  const contado = parseFloat(efectivoContado)
+  if (isNaN(contado) || contado < 0) return { success: false, error: 'Escribe cuánto efectivo contaste.' }
+
+  const cerradaEn = new Date().toISOString()
+  const resumen = resumenCobros(sesion.abierta_en, cerradaEn)
+  const esperado = redondear(sesion.fondo_inicial + resumen.efectivo)
+  const diferencia = redondear(contado - esperado)
+
+  sql.runSync(
+    `UPDATE sesiones_caja SET cerrada_en = ?, usuario_cierre_id = ?, efectivo_esperado = ?,
+     efectivo_contado = ?, diferencia = ?, nota = ? WHERE id = ?`,
+    cerradaEn, usuarioId, esperado, redondear(contado), diferencia, nota?.trim() || null, sesion.id)
+
+  return { success: true, esperado, contado: redondear(contado), diferencia }
+}
+
+function getSesionesCaja(limite = 30) {
+  return sql.getAllSync(
+    `SELECT s.*, ua.nombre AS nombre_apertura, uc.nombre AS nombre_cierre
+     FROM sesiones_caja s
+     LEFT JOIN usuarios ua ON ua.id = s.usuario_apertura_id
+     LEFT JOIN usuarios uc ON uc.id = s.usuario_cierre_id
+     WHERE s.cerrada_en IS NOT NULL
+     ORDER BY s.id DESC LIMIT ?`, limite)
 }
 
 // Para exportar/compartir un respaldo — mantiene el mismo formato que antes
@@ -855,5 +938,6 @@ export default {
   getConfig, updateConfig, getBackupJSON, restaurarBackup, validarBackup,
   getClientes, addCliente, updateCliente, buscarCliente,
   getFiadoCliente, addFiado, pagarFiado, getResumenFiado, getFiadosAntiguos,
-  realizarVenta, getHistorialVentas, getDetalleVenta, getResumenHoy, getResumenPeriodo, getCierreCaja,
+  realizarVenta, getHistorialVentas, getDetalleVenta, getResumenHoy, getResumenPeriodo,
+  getEstadoCaja, getSesionAbierta, abrirCaja, cerrarCaja, getSesionesCaja,
 }
