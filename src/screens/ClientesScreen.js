@@ -1,17 +1,19 @@
 import React, { useState, useCallback } from 'react'
-import { View, Text, TextInput, TouchableOpacity, FlatList, StyleSheet, Modal, ScrollView, Pressable } from 'react-native'
+import { View, Text, TextInput, TouchableOpacity, FlatList, StyleSheet, Modal, ScrollView, Pressable, Alert } from 'react-native'
 import { useFocusEffect } from '@react-navigation/native'
 import db from '../data/db'
 import { colors } from '../theme/colors'
 import { armarMensajeCobranza, abrirWhatsApp } from '../utils/cobranza'
 import { usePieDeHoja } from '../utils/teclado'
 import { coincide } from '../utils/texto'
+import { useSesion } from '../context/SesionContext'
 
 const fmt = (n) => `S/ ${Number(n).toFixed(2)}`
 const METODOS = ['Efectivo', 'Yape', 'Plin']
 const ICONO_METODO = { Efectivo: '💵', Yape: '📱', Plin: '📲' }
 
 export default function ClientesScreen() {
+  const { usuario } = useSesion()
   const { alturaTeclado, espacioAbajo } = usePieDeHoja()
   const [clientes, setClientes] = useState([])
   const [busqueda, setBusqueda] = useState('')
@@ -19,8 +21,10 @@ export default function ClientesScreen() {
   const [form, setForm] = useState({ nombre: '', telefono: '' })
   const [clienteDetalle, setClienteDetalle] = useState(null)
   const [fiados, setFiados] = useState([])
-  const [montoPago, setMontoPago] = useState({})
-  const [metodoPago, setMetodoPago] = useState({})
+  const [montoAbono, setMontoAbono] = useState('')
+  const [metodoAbono, setMetodoAbono] = useState('Efectivo')
+  const [abonando, setAbonando] = useState(false)
+
   const [telefonoEdit, setTelefonoEdit] = useState('')
   const [borradorMensaje, setBorradorMensaje] = useState(null)
 
@@ -86,13 +90,24 @@ export default function ClientesScreen() {
     if (enviado) setBorradorMensaje(null)
   }
 
-  async function pagar(fiadoId) {
-    const monto = parseFloat(montoPago[fiadoId])
-    if (isNaN(monto) || monto <= 0) return
-    await db.pagarFiado({ fiadoId, monto, metodoPago: metodoPago[fiadoId] || 'Efectivo' })
+  async function abonar() {
+    setAbonando(true)
+    const r = await db.abonarACliente({
+      clienteId: clienteDetalle.id,
+      monto: montoAbono,
+      metodoPago: metodoAbono,
+      usuarioId: usuario?.id,
+    })
+    setAbonando(false)
+    if (!r.success) { Alert.alert('No se pudo abonar', r.error); return }
+
+    setMontoAbono('')
     setFiados(db.getFiadoCliente(clienteDetalle.id))
-    setMontoPago(m => ({ ...m, [fiadoId]: '' }))
     cargar()
+
+    const resto = r.saldo_restante > 0 ? `Le queda ${fmt(r.saldo_restante)}.` : 'Quedó al día. 🎉'
+    const vuelto = r.sobrante > 0 ? `\n\nTe dio ${fmt(r.sobrante)} de más: devuélveselo.` : ''
+    Alert.alert('✓ Abono anotado', `Se abonaron ${fmt(r.abonado)}. ${resto}${vuelto}`)
   }
 
   return (
@@ -199,29 +214,58 @@ export default function ClientesScreen() {
                 </>
               )}
             </View>
+            {/* El casero paga a cuenta de lo que debe, no de una compra
+                puntual: un solo monto y la app lo reparte. Repartirlo a mano
+                fila por fila, con el cliente esperando, era más lento que el
+                cuaderno que vino a reemplazar. */}
+            {deudaTotal > 0 && (
+              <View style={styles.bloqueAbono}>
+                <Text style={styles.deudaLabel}>Debe en total</Text>
+                <Text style={styles.deudaMonto}>{fmt(deudaTotal)}</Text>
+
+                <View style={styles.metodoChipsFila}>
+                  {METODOS.map(m => (
+                    <TouchableOpacity key={m} onPress={() => setMetodoAbono(m)}
+                      style={[styles.metodoChip, metodoAbono === m && styles.metodoChipActivo]}>
+                      <Text style={[styles.metodoChipTexto, metodoAbono === m && styles.metodoChipTextoActivo]}>
+                        {ICONO_METODO[m]} {m}
+                      </Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+
+                <View style={styles.fiadoPago}>
+                  <TextInput
+                    style={[styles.input, { flex: 1 }]}
+                    placeholder="¿Cuánto te abona?"
+                    placeholderTextColor={colors.placeholder}
+                    keyboardType="decimal-pad"
+                    value={montoAbono}
+                    onChangeText={setMontoAbono}
+                  />
+                  <TouchableOpacity
+                    style={[styles.botonPagar, !(parseFloat(montoAbono) > 0) && styles.botonDeshabilitado]}
+                    onPress={abonar}
+                    disabled={!(parseFloat(montoAbono) > 0) || abonando}
+                  >
+                    <Text style={styles.botonPagarTexto}>{abonando ? '...' : 'Abonar'}</Text>
+                  </TouchableOpacity>
+                </View>
+                <TouchableOpacity onPress={() => setMontoAbono(String(deudaTotal))}>
+                  <Text style={styles.pagarTodo}>Paga todo ({fmt(deudaTotal)})</Text>
+                </TouchableOpacity>
+              </View>
+            )}
+
+            <Text style={styles.subtituloHistorial}>Historial de la libreta</Text>
             <View>
               {fiados.length === 0 && <Text style={styles.vacio}>Sin historial de fiado.</Text>}
               {fiados.map(f => (
                 <View key={f.id} style={styles.fiadoFila}>
                   <Text style={styles.fiadoConcepto} numberOfLines={2}>{f.concepto}</Text>
-                  <Text style={styles.fiadoFecha}>{new Date(f.fecha).toLocaleDateString('es-PE')} · {f.estado === 'pagado' ? 'Pagado' : `Saldo: ${fmt(f.saldo)}`}</Text>
-                  {f.estado === 'pendiente' && (
-                    <View style={styles.fiadoPagoBloque}>
-                      <View style={styles.metodoChipsFila}>
-                        {METODOS.map(m => (
-                          <TouchableOpacity key={m} onPress={() => setMetodoPago(mp => ({ ...mp, [f.id]: m }))}
-                            style={[styles.metodoChipMini, (metodoPago[f.id] || 'Efectivo') === m && styles.metodoChipMiniActivo]}>
-                            <Text style={styles.metodoChipMiniTexto}>{ICONO_METODO[m]}</Text>
-                          </TouchableOpacity>
-                        ))}
-                      </View>
-                      <View style={styles.fiadoPago}>
-                        <TextInput style={styles.inputPago} placeholder="Monto" placeholderTextColor={colors.placeholder} keyboardType="decimal-pad"
-                          value={montoPago[f.id] || ''} onChangeText={v => setMontoPago(m => ({ ...m, [f.id]: v }))} />
-                        <TouchableOpacity style={styles.botonPagar} onPress={() => pagar(f.id)}><Text style={styles.botonPagarTexto}>Pagar</Text></TouchableOpacity>
-                      </View>
-                    </View>
-                  )}
+                  <Text style={styles.fiadoFecha}>
+                    {new Date(f.fecha).toLocaleDateString('es-PE')} · {f.estado === 'pagado' ? '✓ Pagado' : `Saldo: ${fmt(f.saldo)}`}
+                  </Text>
                 </View>
               ))}
             </View>
@@ -267,13 +311,19 @@ const styles = StyleSheet.create({
   fiadoFila: { backgroundColor: colors.bg, borderRadius: 10, padding: 12, marginBottom: 8, borderWidth: 1, borderColor: colors.border },
   fiadoConcepto: { color: colors.text, fontSize: 13 },
   fiadoFecha: { color: colors.textMuted, fontSize: 11, marginTop: 2 },
-  fiadoPagoBloque: { marginTop: 10, gap: 8 },
   metodoChipsFila: { flexDirection: 'row', gap: 6 },
-  metodoChipMini: { width: 38, height: 34, borderRadius: 8, borderWidth: 1, borderColor: colors.border, alignItems: 'center', justifyContent: 'center', backgroundColor: colors.card },
-  metodoChipMiniActivo: { backgroundColor: colors.accentBg, borderColor: colors.primary },
-  metodoChipMiniTexto: { fontSize: 16 },
   fiadoPago: { flexDirection: 'row', gap: 6 },
-  inputPago: { flex: 1, backgroundColor: colors.input, borderWidth: 1, borderColor: colors.border, borderRadius: 8, padding: 8, color: colors.text, fontSize: 12 },
-  botonPagar: { backgroundColor: colors.primary, borderRadius: 8, paddingHorizontal: 14, justifyContent: 'center' },
+  botonPagar: { backgroundColor: colors.primary, borderRadius: 10, paddingHorizontal: 20, justifyContent: 'center' },
+  botonDeshabilitado: { opacity: 0.5 },
+
+  bloqueAbono: { marginTop: 12, padding: 14, borderRadius: 12, backgroundColor: colors.accentBg, borderWidth: 1, borderColor: colors.primary, gap: 8 },
+  deudaLabel: { color: colors.textMuted, fontSize: 12, fontWeight: '600' },
+  deudaMonto: { color: colors.accent, fontWeight: '800', fontSize: 28 },
+  metodoChip: { flex: 1, paddingVertical: 10, borderRadius: 10, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.card, alignItems: 'center' },
+  metodoChipActivo: { borderColor: colors.primary, backgroundColor: colors.card },
+  metodoChipTexto: { color: colors.textMuted, fontWeight: '600', fontSize: 12 },
+  metodoChipTextoActivo: { color: colors.accent, fontWeight: '700' },
+  pagarTodo: { color: colors.accent, fontWeight: '700', fontSize: 13, textAlign: 'center', paddingVertical: 4 },
+  subtituloHistorial: { color: colors.textMuted, fontSize: 11, fontWeight: '700', textTransform: 'uppercase', letterSpacing: 0.5, marginTop: 16, marginBottom: 4 },
   botonPagarTexto: { color: colors.primaryText, fontWeight: '700', fontSize: 12 },
 })

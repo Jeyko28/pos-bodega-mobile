@@ -593,24 +593,48 @@ function insertarFiado({ clienteId, monto, concepto, usuarioId, ventaId = null }
 
 async function addFiado(args) { return insertarFiado(args) }
 
-async function pagarFiado({ fiadoId, monto, usuarioId, metodoPago = 'Efectivo' }) {
-  const f = sql.getFirstSync('SELECT * FROM fiado WHERE id = ?', fiadoId)
-  if (!f) return { success: false, error: 'Fiado no encontrado' }
+// El casero no paga "la compra del martes": paga a cuenta de lo que debe. La
+// app reparte sola, de la deuda más vieja a la más nueva, y deja un abono por
+// cada deuda tocada para que el historial siga cuadrando deuda por deuda.
+async function abonarACliente({ clienteId, monto, metodoPago = 'Efectivo', usuarioId = null }) {
+  const pendientes = sql.getAllSync(
+    "SELECT * FROM fiado WHERE cliente_id = ? AND estado = 'pendiente' AND saldo > 0 ORDER BY fecha ASC, id ASC",
+    clienteId)
+  if (!pendientes.length) return { success: false, error: 'Este cliente no debe nada.' }
 
-  const mp = Math.min(parseFloat(monto), f.saldo)
-  const saldoRestante = Math.max(f.saldo - mp, 0)
+  const deuda = redondear(pendientes.reduce((s, f) => s + f.saldo, 0))
+  const pedido = parseFloat(monto)
+  if (isNaN(pedido) || pedido <= 0) return { success: false, error: 'Escribe cuánto te está abonando.' }
+
+  // Se topea contra la deuda: nadie abona más de lo que debe, y aceptarlo
+  // dejaría un saldo negativo imposible de explicar después.
+  const aplicar = Math.min(redondear(pedido), deuda)
   const fecha = new Date().toISOString()
-  let pagoId
+  let restante = aplicar
+  const tocadas = []
 
   sql.withTransactionSync(() => {
-    const r = sql.runSync(
-      'INSERT INTO pagos_fiado (fiado_id, monto, metodo_pago, usuario_id, fecha) VALUES (?, ?, ?, ?, ?)',
-      fiadoId, mp, metodoPago, usuarioId || null, fecha)
-    pagoId = r.lastInsertRowId
-    sql.runSync('UPDATE fiado SET saldo = ?, estado = ? WHERE id = ?', saldoRestante, saldoRestante === 0 ? 'pagado' : 'pendiente', fiadoId)
+    for (const f of pendientes) {
+      if (restante <= 0) break
+      const parte = redondear(Math.min(restante, f.saldo))
+      const saldoNuevo = redondear(f.saldo - parte)
+      sql.runSync(
+        'INSERT INTO pagos_fiado (fiado_id, monto, metodo_pago, usuario_id, fecha) VALUES (?, ?, ?, ?, ?)',
+        f.id, parte, metodoPago, usuarioId, fecha)
+      sql.runSync('UPDATE fiado SET saldo = ?, estado = ? WHERE id = ?',
+        saldoNuevo, saldoNuevo === 0 ? 'pagado' : 'pendiente', f.id)
+      restante = redondear(restante - parte)
+      tocadas.push(f.id)
+    }
   })
 
-  return { success: true, pago: { id: pagoId, fiado_id: fiadoId, monto: mp, metodo_pago: metodoPago, fecha }, saldo_restante: saldoRestante }
+  return {
+    success: true,
+    abonado: aplicar,
+    saldo_restante: redondear(deuda - aplicar),
+    deudas_tocadas: tocadas.length,
+    sobrante: redondear(pedido - aplicar),
+  }
 }
 
 function getResumenFiado() {
@@ -1093,7 +1117,7 @@ export default {
   getCategoriasCustom, addCategoriaCustom,
   getConfig, updateConfig, getBackupJSON, restaurarBackup, validarBackup,
   getClientes, addCliente, updateCliente, buscarCliente,
-  getFiadoCliente, addFiado, pagarFiado, getResumenFiado, getFiadosAntiguos, anularPagoFiado,
+  getFiadoCliente, addFiado, abonarACliente, getResumenFiado, getFiadosAntiguos, anularPagoFiado,
   realizarVenta, getHistorialVentas, getDetalleVenta, getResumenHoy, getResumenPeriodo,
   anularVenta, cambiarMetodoPago,
   getEstadoCaja, getSesionAbierta, abrirCaja, cerrarCaja, getSesionesCaja,
