@@ -18,6 +18,7 @@ export default function ClientesScreen() {
   const [montoPago, setMontoPago] = useState({})
   const [metodoPago, setMetodoPago] = useState({})
   const [telefonoEdit, setTelefonoEdit] = useState('')
+  const [borradorMensaje, setBorradorMensaje] = useState(null)
 
   useFocusEffect(useCallback(() => { cargar() }, []))
 
@@ -45,18 +46,26 @@ export default function ClientesScreen() {
   }
 
   const deudaTotal = fiados.filter(f => f.estado === 'pendiente').reduce((s, f) => s + f.saldo, 0)
-  const diasMasAntiguo = fiados
-    .filter(f => f.estado === 'pendiente')
-    .reduce((max, f) => Math.max(max, Math.floor((Date.now() - new Date(f.fecha)) / 86400000)), 0)
 
-  async function cobrarPorWhatsApp() {
-    const mensaje = armarMensajeCobranza({
+  // Se prepara el borrador y se deja editar antes de abrir WhatsApp: a un
+  // cliente se le escribe de una forma y a otro de otra, y eso ninguna
+  // plantilla lo adivina.
+  async function prepararCobranza() {
+    await guardarTelefono()
+    const config = db.getConfig()
+    setBorradorMensaje(armarMensajeCobranza({
       cliente: clienteDetalle,
       deuda: deudaTotal,
-      diasMasAntiguo,
-      negocio: db.getConfig().negocio_nombre,
-    })
-    await abrirWhatsApp({ telefono: clienteDetalle.telefono, mensaje })
+      negocio: config.negocio_nombre,
+      yape: config.negocio_telefono,
+    }))
+  }
+
+  async function enviarCobranza() {
+    // El número que vale es el que está escrito en pantalla, no el que estaba
+    // guardado: si el dueño acaba de tipearlo, tocar el botón debe funcionar.
+    const enviado = await abrirWhatsApp({ telefono: telefonoEdit, mensaje: borradorMensaje })
+    if (enviado) setBorradorMensaje(null)
   }
 
   async function pagar(fiadoId) {
@@ -111,30 +120,51 @@ export default function ClientesScreen() {
           <View style={[styles.modalCaja, { maxHeight: '80%' }]}>
             <Text style={styles.modalTitulo}>{clienteDetalle?.nombre}</Text>
 
-            {deudaTotal > 0 && (
-              <View style={styles.bloqueCobranza}>
-                <View style={styles.filaTelefono}>
-                  <TextInput
-                    style={[styles.input, { flex: 1 }]}
-                    placeholder="Teléfono (para escribirle)"
-                    placeholderTextColor={colors.placeholder}
-                    keyboardType="phone-pad"
-                    value={telefonoEdit}
-                    onChangeText={setTelefonoEdit}
-                    onBlur={guardarTelefono}
-                  />
-                </View>
+            {/* El teléfono se puede guardar siempre, deba o no: si solo apareciera
+                con deuda, habría que esperar a que deba para poder anotarlo. */}
+            <View style={styles.bloqueCobranza}>
+              <TextInput
+                style={styles.input}
+                placeholder="Teléfono (para escribirle por WhatsApp)"
+                placeholderTextColor={colors.placeholder}
+                keyboardType="phone-pad"
+                value={telefonoEdit}
+                onChangeText={setTelefonoEdit}
+                onBlur={guardarTelefono}
+              />
+
+              {deudaTotal > 0 && borradorMensaje === null && (
                 <TouchableOpacity
                   style={[styles.botonWhatsApp, !telefonoEdit.trim() && styles.botonDeshabilitado]}
-                  onPress={cobrarPorWhatsApp}
+                  onPress={prepararCobranza}
                   disabled={!telefonoEdit.trim()}
                 >
                   <Text style={styles.botonWhatsAppTexto}>
                     💬  Recordarle por WhatsApp · {fmt(deudaTotal)}
                   </Text>
                 </TouchableOpacity>
-              </View>
-            )}
+              )}
+
+              {borradorMensaje !== null && (
+                <>
+                  <Text style={styles.etiquetaMensaje}>Revisa el mensaje antes de enviarlo</Text>
+                  <TextInput
+                    style={[styles.input, styles.mensajeInput]}
+                    multiline
+                    value={borradorMensaje}
+                    onChangeText={setBorradorMensaje}
+                  />
+                  <View style={styles.filaTelefono}>
+                    <TouchableOpacity style={styles.botonGhost} onPress={() => setBorradorMensaje(null)}>
+                      <Text style={styles.botonGhostTexto}>Cancelar</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity style={[styles.botonWhatsApp, { flex: 1 }]} onPress={enviarCobranza}>
+                      <Text style={styles.botonWhatsAppTexto}>Enviar</Text>
+                    </TouchableOpacity>
+                  </View>
+                </>
+              )}
+            </View>
             <ScrollView keyboardShouldPersistTaps="handled">
               {fiados.length === 0 && <Text style={styles.vacio}>Sin historial de fiado.</Text>}
               {fiados.map(f => (
@@ -190,6 +220,8 @@ const styles = StyleSheet.create({
   botonGhostTexto: { color: colors.textMuted, fontWeight: '600' },
   botonPrimario: { flex: 1, padding: 14, borderRadius: 10, backgroundColor: colors.primary, alignItems: 'center' },
   botonPrimarioTexto: { color: colors.primaryText, fontWeight: '700' },
+  etiquetaMensaje: { color: colors.textMuted, fontSize: 11, fontWeight: '700', textTransform: 'uppercase', letterSpacing: 0.5 },
+  mensajeInput: { minHeight: 92, textAlignVertical: 'top' },
   bloqueCobranza: { gap: 8, paddingBottom: 12, marginBottom: 4, borderBottomWidth: 1, borderBottomColor: colors.border },
   filaTelefono: { flexDirection: 'row', gap: 8 },
   botonWhatsApp: { paddingVertical: 14, borderRadius: 10, backgroundColor: '#25D366', alignItems: 'center' },

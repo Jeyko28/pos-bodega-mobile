@@ -110,7 +110,9 @@ export const CATALOGO_BASE = [
   { nombre: 'Zanahoria', categoria: 'Verduras', precio: 3.0, tipo_venta: 'granel', unidad: 'kg' },
   { nombre: 'Limón', categoria: 'Verduras', precio: 5.0, tipo_venta: 'granel', unidad: 'kg' },
   { nombre: 'Ajo', categoria: 'Verduras', precio: 12.0, tipo_venta: 'granel', unidad: 'kg' },
-  { nombre: 'Plátano de seda', categoria: 'Frutas', precio: 3.5, tipo_venta: 'granel', unidad: 'kg' },
+  // El plátano se vende suelto y contado, no por kilo: 4 por S/1 es el precio
+  // de mostrador, así que la unidad vale S/0.25 y pedir "un sol" da 4 plátanos.
+  { nombre: 'Plátano de seda', categoria: 'Frutas', precio: 0.25, tipo_venta: 'granel', unidad: 'unidad' },
   { nombre: 'Manzana', categoria: 'Frutas', precio: 5.5, tipo_venta: 'granel', unidad: 'kg' },
   { nombre: 'Naranja', categoria: 'Frutas', precio: 3.0, tipo_venta: 'granel', unidad: 'kg' },
   { nombre: 'Palta', categoria: 'Frutas', precio: 8.0, tipo_venta: 'granel', unidad: 'kg' },

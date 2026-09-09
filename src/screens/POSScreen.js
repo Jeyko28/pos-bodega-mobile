@@ -477,6 +477,9 @@ export default function POSScreen() {
             >
               <Text style={styles.iconoRapido}>{iconoCategoria(item.categoria, categoriasCustom)}</Text>
               <Text style={styles.nombreRapido} numberOfLines={2}>{item.nombre}</Text>
+              {parseFloat(item.stock) <= 0 && (
+                <Text style={styles.sinStockRapido}>Figura sin stock</Text>
+              )}
               <Text style={styles.precioRapido}>
                 {fmt(item.precio)}{item.tipo_venta === 'granel' ? `/${item.unidad || 'kg'}` : ''}
               </Text>
@@ -799,6 +802,7 @@ const styles = StyleSheet.create({
   filaSinStock: { opacity: 0.5, borderStyle: 'dashed' },
   botonRapido: { flex: 1, minHeight: 96, backgroundColor: colors.card, borderRadius: 12, borderWidth: 1, borderColor: colors.border, padding: 12, marginBottom: 8, justifyContent: 'space-between' },
   iconoRapido: { fontSize: 22, lineHeight: 28 },
+  sinStockRapido: { color: colors.danger, fontSize: 11, fontWeight: '700', marginTop: 2 },
   nombreRapido: { color: colors.text, fontWeight: '700', fontSize: 14, marginTop: 4 },
   precioRapido: { color: colors.accent, fontWeight: '800', fontSize: 17, marginTop: 4 },
   nuevoProductoCaja: { marginTop: 10, paddingTop: 12, borderTopWidth: 1, borderTopColor: colors.border, gap: 8 },

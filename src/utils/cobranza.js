@@ -12,14 +12,27 @@ function aFormatoWhatsApp(telefono) {
   return digitos
 }
 
-// El tono es deliberado: directo pero sin acusar. Un mensaje demasiado suave
-// ("cuando pueda, sin apuro") no cobra nada, y uno agresivo le cuesta al
-// bodeguero un cliente del barrio. La deuda y los días van como dato, no como
-// reproche, y se cierra con una pregunta concreta y la puerta abierta.
-export function armarMensajeCobranza({ cliente, deuda, diasMasAntiguo, negocio }) {
-  const antiguedad = diasMasAntiguo > 0 ? ` (la más antigua es de hace ${diasMasAntiguo} días)` : ''
-  return `Hola ${cliente.nombre}, buenas. Le escribo de ${negocio || 'la bodega'} por su cuenta pendiente de ${fmt(deuda)}${antiguedad}. ` +
-    '¿Puede acercarse a cancelar en estos días? Si necesita coordinar algo, me avisa. Gracias.'
+// Se usa solo el primer nombre: en la libreta la gente queda anotada como
+// "Marco el de la esquina" o "Chino casero", y mandar eso textual es un papelón.
+function primerNombre(nombre) {
+  return String(nombre || '').trim().split(/\s+/)[0] || 'vecino'
+}
+
+// El tono es de bodega, no de banco: "lo de la libreta" en vez de "cuenta
+// pendiente". No se menciona hace cuántos días debe — eso se lee como
+// echárselo en cara. Lo que sí va es el número de Yape y la opción de abonar
+// por partes: el sentido de escribir por WhatsApp es que pague sin moverse, y
+// pidiendo el total completo mucha gente no contesta.
+export function armarMensajeCobranza({ cliente, deuda, negocio, yape }) {
+  const partes = [
+    `Hola ${primerNombre(cliente.nombre)}, buenas.`,
+    `Le escribo de ${negocio || 'la bodega'}.`,
+    `Le quedan ${fmt(deuda)} de la libreta.`,
+    '¿Me lo puede ir abonando?',
+  ]
+  if (yape) partes.push(`Si le queda más fácil me yapea al ${yape}, aunque sea una parte.`)
+  partes.push('Cualquier cosa me avisa. Gracias.')
+  return partes.join(' ')
 }
 
 // El enlace wa.me funciona tenga o no la app instalada (cae a WhatsApp Web),

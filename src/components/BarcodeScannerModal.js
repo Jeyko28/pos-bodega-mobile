@@ -10,6 +10,7 @@ export default function BarcodeScannerModal({ onClose, onScanned, continuo = fal
   const [permission, requestPermission] = useCameraPermissions()
   const [bloqueado, setBloqueado] = useState(false)
   const temporizador = useRef(null)
+  const ultimoCodigo = useRef({ data: null, momento: 0 })
 
   useEffect(() => {
     if (permission && !permission.granted && permission.canAskAgain) {
@@ -21,11 +22,23 @@ export default function BarcodeScannerModal({ onClose, onScanned, continuo = fal
 
   function handleScanned({ data }) {
     if (bloqueado) return
+
+    // El mismo código seguido solo cuenta una vez cada 3 segundos: con el
+    // celular apoyado apuntando a la caja, la cámara vuelve a leer el mismo
+    // producto una y otra vez y sumaría unidades que nunca llegaron. Un código
+    // distinto entra al instante, así que pasar productos de corrido sigue
+    // siendo rápido.
+    const ahora = Date.now()
+    if (continuo && data === ultimoCodigo.current.data && ahora - ultimoCodigo.current.momento < 3000) {
+      return
+    }
+    ultimoCodigo.current = { data, momento: ahora }
+
     setBloqueado(true)
     onScanned(data)
     // En modo continuo la cámara se rearma sola: permite pasar varios productos
     // seguidos sin cerrar y reabrir el escáner en cada uno.
-    if (continuo) temporizador.current = setTimeout(() => setBloqueado(false), 1200)
+    if (continuo) temporizador.current = setTimeout(() => setBloqueado(false), 900)
   }
 
   return (
