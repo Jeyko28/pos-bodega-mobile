@@ -1,5 +1,6 @@
 import React, { useState, useCallback, useEffect } from 'react'
-import { View, Text, TextInput, TouchableOpacity, StyleSheet, ScrollView, Alert } from 'react-native'
+import { View, Text, TextInput, TouchableOpacity, StyleSheet, Alert } from 'react-native'
+import { KeyboardAwareScrollView } from 'react-native-keyboard-aware-scroll-view'
 import { useFocusEffect } from '@react-navigation/native'
 import { File, Paths } from 'expo-file-system'
 import * as Sharing from 'expo-sharing'
@@ -91,7 +92,8 @@ export default function ConfiguracionScreen() {
     try {
       const elegido = await File.pickFileAsync({ mimeTypes: ['application/json'] })
       if (elegido.canceled) return
-      datos = JSON.parse(elegido.result.text())
+      const texto = await elegido.result.text()
+      datos = JSON.parse(texto)
     } catch (e) {
       Alert.alert('No se pudo leer', 'El archivo no se pudo abrir o no es un JSON válido.')
       return
@@ -161,7 +163,13 @@ export default function ConfiguracionScreen() {
   if (!config) return <View style={styles.root} />
 
   return (
-    <ScrollView style={styles.root} contentContainerStyle={{ padding: 16, gap: 16 }}>
+    <KeyboardAwareScrollView
+      style={styles.root}
+      contentContainerStyle={{ padding: 16, paddingBottom: 24, gap: 16 }}
+      keyboardShouldPersistTaps="handled"
+      enableOnAndroid
+      extraScrollHeight={20}
+    >
       <View style={styles.tarjeta}>
         <Text style={styles.tituloSeccion}>🏪 Datos del negocio</Text>
         <Text style={styles.etiqueta}>Nombre del negocio</Text>
@@ -289,7 +297,7 @@ export default function ConfiguracionScreen() {
       </View>
 
       <Text style={styles.version}>POS Bodega · Fase 1 (celular)</Text>
-    </ScrollView>
+    </KeyboardAwareScrollView>
   )
 }
 

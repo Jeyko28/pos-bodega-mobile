@@ -1,11 +1,12 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react'
-import { View, Text, TextInput, TouchableOpacity, FlatList, StyleSheet, Modal, ScrollView, ActivityIndicator, Alert, KeyboardAvoidingView, Platform, Pressable, Animated } from 'react-native'
+import { View, Text, TextInput, TouchableOpacity, FlatList, StyleSheet, Modal, ScrollView, ActivityIndicator, Alert, Pressable, Animated } from 'react-native'
 import { useFocusEffect } from '@react-navigation/native'
 import db from '../data/db'
 import { useSesion } from '../context/SesionContext'
 import { colors } from '../theme/colors'
 import { CATEGORIAS_BASE, iconoCategoria } from '../data/categorias'
 import { coincide, esElMismo } from '../utils/texto'
+import { usePieDeHoja } from '../utils/teclado'
 import BarcodeScannerModal from '../components/BarcodeScannerModal'
 import { chips } from '../theme/chips'
 import * as Haptics from 'expo-haptics'
@@ -40,6 +41,7 @@ function nuevoCarrito(carritosActuales = []) {
 
 export default function POSScreen() {
   const { usuario } = useSesion()
+  const { alturaTeclado, espacioAbajo } = usePieDeHoja()
   const [productos, setProductos] = useState([])
   const [busqueda, setBusqueda] = useState('')
   const [carritos, setCarritos] = useState([nuevoCarrito()])
@@ -552,9 +554,9 @@ export default function POSScreen() {
 
       {/* Código escaneado que todavía no pertenece a ningún producto */}
       <Modal visible={!!codigoHuerfano} transparent animationType="slide" onRequestClose={() => setCodigoHuerfano(null)}>
-        <KeyboardAvoidingView style={styles.modalFondo} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+        <View style={[styles.modalFondo, { paddingBottom: alturaTeclado }]}>
           <Pressable style={StyleSheet.absoluteFill} onPress={() => setCodigoHuerfano(null)} />
-          <View style={[styles.modalCaja, { maxHeight: '85%' }]}>
+          <ScrollView style={{ maxHeight: '85%' }} contentContainerStyle={[styles.modalCaja, { paddingBottom: 20 + espacioAbajo }]} keyboardShouldPersistTaps="handled">
             <Text style={styles.modalTitulo}>Código nuevo</Text>
             <Text style={styles.textoMuted}>
               {codigoHuerfano} — todavía no está en ningún producto. Elige a cuál pertenece y queda guardado para siempre.
@@ -616,8 +618,8 @@ export default function POSScreen() {
             <TouchableOpacity style={[styles.botonGhost, { flex: 0 }]} onPress={cerrarCodigoHuerfano}>
               <Text style={styles.botonGhostTexto}>Ahora no</Text>
             </TouchableOpacity>
-          </View>
-        </KeyboardAvoidingView>
+          </ScrollView>
+        </View>
       </Modal>
 
       {/* Escáner de código de barras */}
@@ -632,9 +634,9 @@ export default function POSScreen() {
 
       {/* Modal de pago */}
       <Modal visible={modalPago} transparent animationType="slide" onRequestClose={() => setModalPago(false)}>
-        <KeyboardAvoidingView style={styles.modalFondo} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+        <View style={[styles.modalFondo, { paddingBottom: alturaTeclado }]}>
           <Pressable style={StyleSheet.absoluteFill} onPress={() => setModalPago(false)} />
-          <ScrollView style={styles.modalScrollLimite} contentContainerStyle={styles.modalCaja} keyboardShouldPersistTaps="handled">
+          <ScrollView style={styles.modalScrollLimite} contentContainerStyle={[styles.modalCaja, { paddingBottom: 20 + espacioAbajo }]} keyboardShouldPersistTaps="handled">
             <Text style={styles.modalTitulo}>Método de pago — {fmt(total)}</Text>
             <View style={styles.metodosGrid}>
               {METODOS.map(m => (
@@ -725,14 +727,14 @@ export default function POSScreen() {
               </TouchableOpacity>
             </View>
           </ScrollView>
-        </KeyboardAvoidingView>
+        </View>
       </Modal>
 
       {/* Modal de peso (granel) */}
       <Modal visible={!!productoGranel} transparent animationType="slide" onRequestClose={() => setProductoGranel(null)}>
-        <KeyboardAvoidingView style={styles.modalFondo} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+        <View style={[styles.modalFondo, { paddingBottom: alturaTeclado }]}>
           <Pressable style={StyleSheet.absoluteFill} onPress={() => setProductoGranel(null)} />
-          <ScrollView style={styles.modalScrollLimite} contentContainerStyle={styles.modalCaja} keyboardShouldPersistTaps="handled">
+          <ScrollView style={styles.modalScrollLimite} contentContainerStyle={[styles.modalCaja, { paddingBottom: 20 + espacioAbajo }]} keyboardShouldPersistTaps="handled">
             <Text style={styles.modalTitulo}>⚖️ {productoGranel?.nombre}</Text>
             <Text style={styles.textoMuted}>{fmt(productoGranel?.precio)} por {productoGranel?.unidad || 'kg'}</Text>
 
@@ -777,7 +779,7 @@ export default function POSScreen() {
               </TouchableOpacity>
             </View>
           </ScrollView>
-        </KeyboardAvoidingView>
+        </View>
       </Modal>
     </View>
   )

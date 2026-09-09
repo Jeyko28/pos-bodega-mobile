@@ -11,6 +11,7 @@ import ConfiguracionScreen from '../screens/ConfiguracionScreen'
 import db from '../data/db'
 import { BotonNotificaciones, construirAvisos } from '../components/HeaderAcciones'
 import PanelUsuario from '../components/PanelUsuario'
+import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { colors } from '../theme/colors'
 
 const Tab = createBottomTabNavigator()
@@ -51,6 +52,7 @@ function TabIcon({ ruta, focused, color }) {
 }
 
 export default function MainTabs() {
+  const insets = useSafeAreaInsets()
   const [bajoStock, setBajoStock] = useState(0)
   const [avisos, setAvisos] = useState([])
 
@@ -74,9 +76,13 @@ export default function MainTabs() {
         headerStyle: { backgroundColor: colors.card },
         headerTintColor: colors.text,
         headerShadowVisible: false,
+        headerTitleAlign: 'center',
         headerLeft: () => <PanelUsuario />,
         headerRight: () => <BotonNotificaciones avisos={avisos} />,
-        tabBarStyle: { backgroundColor: colors.card, borderTopColor: colors.border },
+        // El área segura reserva la franja de la barra de gestos, pero el
+        // indicador se dibuja dentro de ella y las etiquetas quedaban pegadas:
+        // van 10 más de aire para que no se toquen.
+        tabBarStyle: { backgroundColor: colors.card, borderTopColor: colors.border, height: 64 + insets.bottom, paddingBottom: insets.bottom + 10 },
         tabBarActiveTintColor: colors.accent,
         tabBarInactiveTintColor: colors.textMuted,
         tabBarLabelStyle: { fontSize: 11, fontWeight: '600' },

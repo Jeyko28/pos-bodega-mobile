@@ -13,7 +13,13 @@ const CLIENT_ID = '953316471021-fss1su32i361nm6np4i3guh3i473lf3g.apps.googleuser
 const ID_SIN_SUFIJO = CLIENT_ID.replace('.apps.googleusercontent.com', '')
 export const ESQUEMA_REDIRECCION = `com.googleusercontent.apps.${ID_SIN_SUFIJO}`
 
-const REDIRECT_URI = AuthSession.makeRedirectUri({ scheme: ESQUEMA_REDIRECCION, path: 'oauth2redirect' })
+// Se arma el string a mano, sin makeRedirectUri(): esa función construye
+// "esquema://oauth2redirect" (doble barra, formato de URL normal), pero Google
+// exige "esquema:/oauth2redirect" (una sola barra) para clientes tipo Android
+// — es su convención de apps nativas, no una URL con host. La diferencia de una
+// barra hace que Google rechace la solicitud completa con "Error 400:
+// invalid_request... no cumple con la política de OAuth 2.0 de Google".
+const REDIRECT_URI = `${ESQUEMA_REDIRECCION}:/oauth2redirect`
 
 export const DISCOVERY = {
   authorizationEndpoint: 'https://accounts.google.com/o/oauth2/v2/auth',

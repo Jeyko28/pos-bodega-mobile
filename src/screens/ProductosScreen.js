@@ -1,5 +1,5 @@
 import React, { useState, useCallback } from 'react'
-import { View, Text, TextInput, TouchableOpacity, FlatList, StyleSheet, Modal, Alert, KeyboardAvoidingView, Platform, ScrollView, Pressable } from 'react-native'
+import { View, Text, TextInput, TouchableOpacity, FlatList, StyleSheet, Modal, Alert, ScrollView, Pressable } from 'react-native'
 import { useFocusEffect } from '@react-navigation/native'
 import db from '../data/db'
 import { colors } from '../theme/colors'
@@ -8,6 +8,7 @@ import CatalogoBase from '../components/CatalogoBase'
 import IngresoMercaderia from '../components/IngresoMercaderia'
 import { sugerirEmoji } from '../utils/emoji'
 import { CATEGORIAS_BASE } from '../data/categorias'
+import { usePieDeHoja } from '../utils/teclado'
 import { chips } from '../theme/chips'
 import { coincide } from '../utils/texto'
 
@@ -22,6 +23,7 @@ const UNIDADES_GRANEL = [
 ]
 
 export default function ProductosScreen() {
+  const { alturaTeclado, espacioAbajo } = usePieDeHoja()
   const [productos, setProductos] = useState([])
   const [busqueda, setBusqueda] = useState('')
   const [categoriaFiltro, setCategoriaFiltro] = useState(null)
@@ -187,9 +189,9 @@ export default function ProductosScreen() {
         {scanner ? (
           <BarcodeScannerModal onClose={() => setScanner(false)} onScanned={handleCodigoEscaneado} />
         ) : (
-        <KeyboardAvoidingView style={styles.modalFondo} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+        <View style={[styles.modalFondo, { paddingBottom: alturaTeclado }]}>
           <Pressable style={StyleSheet.absoluteFill} onPress={() => setModal(false)} />
-          <ScrollView style={styles.modalScrollLimite} contentContainerStyle={styles.modalCaja} keyboardShouldPersistTaps="handled">
+          <ScrollView style={styles.modalScrollLimite} contentContainerStyle={[styles.modalCaja, { paddingBottom: 20 + espacioAbajo }]} keyboardShouldPersistTaps="handled">
             <Text style={styles.modalTitulo}>{editando ? 'Editar producto' : 'Nuevo producto'}</Text>
             <TextInput style={styles.input} placeholder="Nombre" placeholderTextColor={colors.placeholder} value={form.nombre} onChangeText={v => setForm(f => ({ ...f, nombre: v }))} />
             <TextInput style={styles.input} placeholder="Precio" placeholderTextColor={colors.placeholder} keyboardType="decimal-pad" value={form.precio} onChangeText={v => setForm(f => ({ ...f, precio: v }))} />
@@ -261,7 +263,7 @@ export default function ProductosScreen() {
               </TouchableOpacity>
             </View>
           </ScrollView>
-        </KeyboardAvoidingView>
+        </View>
         )}
       </Modal>
     </View>

@@ -1,15 +1,17 @@
 import React, { useState, useCallback } from 'react'
-import { View, Text, TextInput, TouchableOpacity, FlatList, StyleSheet, Modal, ScrollView, KeyboardAvoidingView, Platform, Pressable } from 'react-native'
+import { View, Text, TextInput, TouchableOpacity, FlatList, StyleSheet, Modal, ScrollView, Pressable } from 'react-native'
 import { useFocusEffect } from '@react-navigation/native'
 import db from '../data/db'
 import { colors } from '../theme/colors'
 import { armarMensajeCobranza, abrirWhatsApp } from '../utils/cobranza'
+import { usePieDeHoja } from '../utils/teclado'
 
 const fmt = (n) => `S/ ${Number(n).toFixed(2)}`
 const METODOS = ['Efectivo', 'Yape', 'Plin']
 const ICONO_METODO = { Efectivo: '💵', Yape: '📱', Plin: '📲' }
 
 export default function ClientesScreen() {
+  const { alturaTeclado, espacioAbajo } = usePieDeHoja()
   const [clientes, setClientes] = useState([])
   const [modalNuevo, setModalNuevo] = useState(false)
   const [form, setForm] = useState({ nombre: '', telefono: '' })
@@ -111,9 +113,9 @@ export default function ClientesScreen() {
 
       {/* Nuevo cliente */}
       <Modal visible={modalNuevo} transparent animationType="slide" onRequestClose={() => setModalNuevo(false)}>
-        <KeyboardAvoidingView style={styles.modalFondo} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+        <View style={[styles.modalFondo, { paddingBottom: alturaTeclado }]}>
           <Pressable style={StyleSheet.absoluteFill} onPress={() => setModalNuevo(false)} />
-          <ScrollView style={styles.modalScrollLimite} contentContainerStyle={styles.modalCaja} keyboardShouldPersistTaps="handled">
+          <ScrollView style={styles.modalScrollLimite} contentContainerStyle={[styles.modalCaja, { paddingBottom: 20 + espacioAbajo }]} keyboardShouldPersistTaps="handled">
             <Text style={styles.modalTitulo}>Nuevo cliente</Text>
             <TextInput style={styles.input} placeholder="Nombre" placeholderTextColor={colors.placeholder} value={form.nombre} onChangeText={v => setForm(f => ({ ...f, nombre: v }))} />
             <TextInput style={styles.input} placeholder="Teléfono (opcional)" placeholderTextColor={colors.placeholder} value={form.telefono} onChangeText={v => setForm(f => ({ ...f, telefono: v }))} />
@@ -122,14 +124,14 @@ export default function ClientesScreen() {
               <TouchableOpacity style={styles.botonPrimario} onPress={guardarCliente}><Text style={styles.botonPrimarioTexto}>Guardar</Text></TouchableOpacity>
             </View>
           </ScrollView>
-        </KeyboardAvoidingView>
+        </View>
       </Modal>
 
       {/* Detalle / fiado */}
       <Modal visible={!!clienteDetalle} transparent animationType="slide" onRequestClose={cerrarDetalle}>
-        <KeyboardAvoidingView style={styles.modalFondo} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+        <View style={[styles.modalFondo, { paddingBottom: alturaTeclado }]}>
           <Pressable style={StyleSheet.absoluteFill} onPress={cerrarDetalle} />
-          <View style={[styles.modalCaja, { maxHeight: '80%' }]}>
+          <ScrollView style={{ maxHeight: '80%' }} contentContainerStyle={[styles.modalCaja, { paddingBottom: 20 + espacioAbajo }]} keyboardShouldPersistTaps="handled">
             <Text style={styles.modalTitulo}>{clienteDetalle?.nombre}</Text>
 
             {/* El teléfono se puede guardar siempre, deba o no: si solo apareciera
@@ -187,7 +189,7 @@ export default function ClientesScreen() {
                 </>
               )}
             </View>
-            <ScrollView keyboardShouldPersistTaps="handled">
+            <View>
               {fiados.length === 0 && <Text style={styles.vacio}>Sin historial de fiado.</Text>}
               {fiados.map(f => (
                 <View key={f.id} style={styles.fiadoFila}>
@@ -212,10 +214,10 @@ export default function ClientesScreen() {
                   )}
                 </View>
               ))}
-            </ScrollView>
+            </View>
             <TouchableOpacity style={styles.botonGhost} onPress={cerrarDetalle}><Text style={styles.botonGhostTexto}>Cerrar</Text></TouchableOpacity>
-          </View>
-        </KeyboardAvoidingView>
+          </ScrollView>
+        </View>
       </Modal>
     </View>
   )

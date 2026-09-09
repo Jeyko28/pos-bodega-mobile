@@ -1,9 +1,10 @@
 import React, { useState } from 'react'
-import { View, Text, TextInput, TouchableOpacity, Modal, ScrollView, Pressable, StyleSheet, KeyboardAvoidingView, Platform, Alert } from 'react-native'
+import { View, Text, TextInput, TouchableOpacity, Modal, ScrollView, Pressable, StyleSheet, Alert } from 'react-native'
 import { Ionicons } from '@expo/vector-icons'
 import db from '../data/db'
 import BotonHeader from './BotonHeader'
 import { useSesion } from '../context/SesionContext'
+import { usePieDeHoja } from '../utils/teclado'
 import { colors } from '../theme/colors'
 
 const FORM_VACIO = { nombre: '', username: '', password: '', rol: 'cajero' }
@@ -13,6 +14,7 @@ const FORM_VACIO = { nombre: '', username: '', password: '', rol: 'cajero' }
 // dos sin responder.
 export default function PanelUsuario() {
   const { usuario, handleLogout } = useSesion()
+  const { alturaTeclado, espacioAbajo } = usePieDeHoja()
   const [abierto, setAbierto] = useState(false)
   const [vista, setVista] = useState('menu')
 
@@ -90,9 +92,9 @@ export default function PanelUsuario() {
       <BotonHeader icono="person-circle" activo={abierto} onPress={abrir} />
 
       <Modal visible={abierto} transparent animationType="slide" onRequestClose={cerrar}>
-        <KeyboardAvoidingView style={styles.fondo} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+        <View style={[styles.fondo, { paddingBottom: alturaTeclado }]}>
           <Pressable style={StyleSheet.absoluteFill} onPress={cerrar} />
-          <View style={styles.hoja}>
+          <ScrollView style={styles.hojaScrollLimite} contentContainerStyle={[styles.hoja, { paddingBottom: 20 + espacioAbajo }]} keyboardShouldPersistTaps="handled">
             {vista === 'menu' && (
               <>
                 <View style={styles.perfil}>
@@ -218,8 +220,8 @@ export default function PanelUsuario() {
                 </View>
               </>
             )}
-          </View>
-        </KeyboardAvoidingView>
+          </ScrollView>
+        </View>
       </Modal>
     </>
   )
@@ -227,6 +229,7 @@ export default function PanelUsuario() {
 
 const styles = StyleSheet.create({
   fondo: { flex: 1, backgroundColor: colors.overlay, justifyContent: 'flex-end' },
+  hojaScrollLimite: { flexGrow: 0, maxHeight: '85%' },
   hoja: { backgroundColor: colors.card, borderTopLeftRadius: 20, borderTopRightRadius: 20, padding: 20, gap: 10 },
 
   perfil: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingBottom: 6 },

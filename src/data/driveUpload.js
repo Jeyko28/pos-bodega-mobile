@@ -31,7 +31,7 @@ export async function subirArchivoADrive(uri, nombreArchivo) {
   if (!accessToken) return { success: false, error: 'Google Drive no está conectado.' }
 
   const carpetaId = await obtenerOCrearCarpeta(accessToken)
-  const contenido = new File(uri).text()
+  const contenido = await new File(uri).text()
 
   const metadata = { name: nombreArchivo, parents: [carpetaId] }
   const cuerpo =

@@ -1,5 +1,6 @@
 import React, { useState, useMemo } from 'react'
-import { View, Text, TextInput, TouchableOpacity, ScrollView, StyleSheet, KeyboardAvoidingView, Platform, Alert } from 'react-native'
+import { View, Text, TextInput, TouchableOpacity, ScrollView, StyleSheet, Alert } from 'react-native'
+import { KeyboardAwareScrollView } from 'react-native-keyboard-aware-scroll-view'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { Ionicons } from '@expo/vector-icons'
 import db from '../data/db'
@@ -60,7 +61,7 @@ export default function CatalogoBase({ onCerrar, onAgregados }) {
   }
 
   return (
-    <KeyboardAvoidingView style={styles.root} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+    <View style={styles.root}>
       <View style={[styles.encabezado, { paddingTop: insets.top + 14 }]}>
         <Text style={styles.titulo}>Productos comunes de bodega</Text>
         <Text style={styles.ayuda}>
@@ -95,7 +96,7 @@ export default function CatalogoBase({ onCerrar, onAgregados }) {
         )}
       </View>
 
-      <ScrollView style={styles.lista} keyboardShouldPersistTaps="handled">
+      <KeyboardAwareScrollView style={styles.lista} keyboardShouldPersistTaps="handled" enableOnAndroid extraScrollHeight={20}>
         {visibles.map(p => {
           const existe = yaExisten.has(normalizar(p.nombre))
           const marcado = !!seleccion[p.nombre]
@@ -127,7 +128,7 @@ export default function CatalogoBase({ onCerrar, onAgregados }) {
             </TouchableOpacity>
           )
         })}
-      </ScrollView>
+      </KeyboardAwareScrollView>
 
       <View style={[styles.pie, { paddingBottom: insets.bottom + 16 }]}>
         <TouchableOpacity style={styles.botonGhost} onPress={onCerrar}>
@@ -140,7 +141,7 @@ export default function CatalogoBase({ onCerrar, onAgregados }) {
           </Text>
         </TouchableOpacity>
       </View>
-    </KeyboardAvoidingView>
+    </View>
   )
 }
 

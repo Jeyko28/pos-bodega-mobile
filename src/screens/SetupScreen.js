@@ -1,5 +1,6 @@
 import React, { useState } from 'react'
-import { View, Text, TextInput, TouchableOpacity, StyleSheet, KeyboardAvoidingView, Platform, ScrollView, ActivityIndicator } from 'react-native'
+import { View, Text, TextInput, TouchableOpacity, StyleSheet, ActivityIndicator } from 'react-native'
+import { KeyboardAwareScrollView } from 'react-native-keyboard-aware-scroll-view'
 import db from '../data/db'
 import { colors } from '../theme/colors'
 
@@ -27,8 +28,7 @@ export default function SetupScreen({ onCompleto }) {
   }
 
   return (
-    <KeyboardAvoidingView style={styles.root} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
-      <ScrollView contentContainerStyle={styles.scroll}>
+    <KeyboardAwareScrollView style={styles.root} contentContainerStyle={styles.scroll} enableOnAndroid extraScrollHeight={20}>
         <Text style={styles.emoji}>🏪</Text>
         <Text style={styles.titulo}>Bienvenido a POS Bodega</Text>
         <Text style={styles.subtitulo}>Configura tu negocio para empezar a vender</Text>
@@ -54,14 +54,13 @@ export default function SetupScreen({ onCompleto }) {
         <TouchableOpacity style={[styles.boton, !listo && styles.botonDeshabilitado]} disabled={!listo || cargando} onPress={handleCrear}>
           {cargando ? <ActivityIndicator color={colors.primaryText} /> : <Text style={styles.botonTexto}>Crear mi bodega</Text>}
         </TouchableOpacity>
-      </ScrollView>
-    </KeyboardAvoidingView>
+    </KeyboardAwareScrollView>
   )
 }
 
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: colors.bg },
-  scroll: { padding: 24, paddingTop: 64, flexGrow: 1 },
+  scroll: { padding: 24, paddingTop: 64, paddingBottom: 32, flexGrow: 1 },
   emoji: { fontSize: 48, textAlign: 'center', marginBottom: 8 },
   titulo: { fontSize: 22, fontWeight: '700', color: colors.text, textAlign: 'center', marginBottom: 4 },
   subtitulo: { fontSize: 14, color: colors.textMuted, textAlign: 'center', marginBottom: 32 },

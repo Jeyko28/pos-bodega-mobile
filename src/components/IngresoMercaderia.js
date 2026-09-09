@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react'
-import { View, Text, TextInput, TouchableOpacity, ScrollView, StyleSheet, KeyboardAvoidingView, Platform, Alert } from 'react-native'
+import { View, Text, TextInput, TouchableOpacity, ScrollView, StyleSheet, Alert } from 'react-native'
+import { KeyboardAwareScrollView } from 'react-native-keyboard-aware-scroll-view'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { Ionicons } from '@expo/vector-icons'
 import * as Haptics from 'expo-haptics'
@@ -27,6 +28,7 @@ export default function IngresoMercaderia({ onCerrar, onGuardado }) {
   const [cargado, setCargado] = useState(false)
   const [codigoDesconocido, setCodigoDesconocido] = useState(null)
   const [nuevo, setNuevo] = useState({ nombre: '', precio: '', cantidad: '1' })
+  const [ultimoAgregado, setUltimoAgregado] = useState(null)
   const [vista, setVista] = useState('ingreso')
   const [ingresos, setIngresos] = useState([])
   const [guardando, setGuardando] = useState(false)
@@ -69,15 +71,19 @@ export default function IngresoMercaderia({ onCerrar, onGuardado }) {
         return es.map((e, idx) => idx === i ? { ...e, cantidad: sumada } : e)
       }
       setMensajeScanner({ ok: true, texto: `✓ ${producto.nombre} — van ${es.length + 1}` })
-      return [...es, {
+      // Va primero, no al final: así el que acabas de tocar queda siempre
+      // pegado al buscador, nunca tapado por el teclado numérico aunque ya
+      // tengas una lista larga.
+      return [{
         id: producto.id,
         nombre: producto.nombre,
         categoria: producto.categoria,
         stockActual: parseFloat(producto.stock),
         unidad: producto.tipo_venta === 'granel' ? (producto.unidad || 'kg') : 'uds',
         cantidad: cantidadInicial,
-      }]
+      }, ...es]
     })
+    setUltimoAgregado(producto.id)
     setBusqueda('')
   }
 
@@ -210,7 +216,7 @@ export default function IngresoMercaderia({ onCerrar, onGuardado }) {
   }
 
   return (
-    <KeyboardAvoidingView style={styles.root} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+    <View style={styles.root}>
       <View style={[styles.encabezado, { paddingTop: insets.top + 14 }]}>
         <Text style={styles.titulo}>Ingresar mercadería</Text>
         <Text style={styles.ayuda}>
@@ -314,7 +320,7 @@ export default function IngresoMercaderia({ onCerrar, onGuardado }) {
       )}
 
       {vista === 'ingreso' && (
-      <ScrollView style={styles.lista} keyboardShouldPersistTaps="handled">
+      <KeyboardAwareScrollView style={styles.lista} keyboardShouldPersistTaps="handled" enableOnAndroid extraScrollHeight={20}>
         {entradas.length > 0 && (
           <>
             <Text style={styles.subtitulo}>Lo que llegó ({entradas.length})</Text>
@@ -335,6 +341,8 @@ export default function IngresoMercaderia({ onCerrar, onGuardado }) {
                   value={e.cantidad}
                   onChangeText={v => cambiarCantidad(e.id, v)}
                   selectTextOnFocus
+                  autoFocus={e.id === ultimoAgregado}
+                  onFocus={() => setUltimoAgregado(null)}
                 />
                 <TouchableOpacity onPress={() => quitar(e.id)} style={styles.quitar}>
                   <Ionicons name="close-circle" size={22} color={colors.textMuted} />
@@ -361,7 +369,7 @@ export default function IngresoMercaderia({ onCerrar, onGuardado }) {
             {busqueda.trim() ? 'Ningún producto coincide.' : 'Ya agregaste todos tus productos a la lista.'}
           </Text>
         )}
-      </ScrollView>
+      </KeyboardAwareScrollView>
       )}
 
       <View style={[styles.pie, { paddingBottom: insets.bottom + 16 }]}>
@@ -378,7 +386,7 @@ export default function IngresoMercaderia({ onCerrar, onGuardado }) {
           </Text>
         </TouchableOpacity>
       </View>
-    </KeyboardAvoidingView>
+    </View>
   )
 }
 
