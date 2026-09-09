@@ -5,6 +5,7 @@ import db from '../data/db'
 import { colors } from '../theme/colors'
 import { armarMensajeCobranza, abrirWhatsApp } from '../utils/cobranza'
 import { usePieDeHoja } from '../utils/teclado'
+import { coincide } from '../utils/texto'
 
 const fmt = (n) => `S/ ${Number(n).toFixed(2)}`
 const METODOS = ['Efectivo', 'Yape', 'Plin']
@@ -13,6 +14,7 @@ const ICONO_METODO = { Efectivo: '💵', Yape: '📱', Plin: '📲' }
 export default function ClientesScreen() {
   const { alturaTeclado, espacioAbajo } = usePieDeHoja()
   const [clientes, setClientes] = useState([])
+  const [busqueda, setBusqueda] = useState('')
   const [modalNuevo, setModalNuevo] = useState(false)
   const [form, setForm] = useState({ nombre: '', telefono: '' })
   const [clienteDetalle, setClienteDetalle] = useState(null)
@@ -59,6 +61,8 @@ export default function ClientesScreen() {
     setBorradorMensaje(null)
   }
 
+  const clientesFiltrados = clientes.filter(c => coincide(c.nombre, busqueda))
+
   const deudaTotal = fiados.filter(f => f.estado === 'pendiente').reduce((s, f) => s + f.saldo, 0)
 
   // Se prepara el borrador y se deja editar antes de abrir WhatsApp: a un
@@ -94,12 +98,18 @@ export default function ClientesScreen() {
   return (
     <View style={styles.root}>
       <View style={styles.header}>
-        <Text style={styles.titulo}>Clientes</Text>
+        <TextInput
+          style={styles.buscador}
+          placeholder="🔍 Buscar casero..."
+          placeholderTextColor={colors.placeholder}
+          value={busqueda}
+          onChangeText={setBusqueda}
+        />
         <TouchableOpacity style={styles.botonNuevo} onPress={() => setModalNuevo(true)}><Text style={styles.botonNuevoTexto}>+ Cliente</Text></TouchableOpacity>
       </View>
 
       <FlatList
-        data={clientes}
+        data={clientesFiltrados}
         keyExtractor={c => String(c.id)}
         contentContainerStyle={{ padding: 12 }}
         renderItem={({ item }) => (
@@ -108,7 +118,7 @@ export default function ClientesScreen() {
             {item.deuda_total > 0 ? <Text style={styles.deuda}>Debe {fmt(item.deuda_total)}</Text> : <Text style={styles.alDia}>Al día</Text>}
           </TouchableOpacity>
         )}
-        ListEmptyComponent={<Text style={styles.vacio}>No hay clientes registrados todavía.</Text>}
+        ListEmptyComponent={<Text style={styles.vacio}>{busqueda.trim() ? 'Ningún casero coincide.' : 'No hay clientes registrados todavía.'}</Text>}
       />
 
       {/* Nuevo cliente */}
@@ -225,8 +235,8 @@ export default function ClientesScreen() {
 
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: colors.bg },
-  header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', padding: 16 },
-  titulo: { color: colors.text, fontWeight: '700', fontSize: 18 },
+  header: { flexDirection: 'row', gap: 8, alignItems: 'center', padding: 12 },
+  buscador: { flex: 1, backgroundColor: colors.input, borderWidth: 1, borderColor: colors.border, borderRadius: 10, padding: 12, color: colors.text },
   botonNuevo: { backgroundColor: colors.primary, borderRadius: 10, paddingHorizontal: 16, paddingVertical: 10 },
   botonNuevoTexto: { color: colors.primaryText, fontWeight: '700' },
   fila: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', backgroundColor: colors.card, borderRadius: 10, padding: 14, marginBottom: 8, borderWidth: 1, borderColor: colors.border },
