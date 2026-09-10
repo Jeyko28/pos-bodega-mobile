@@ -2,6 +2,7 @@ import * as SQLite from 'expo-sqlite'
 import * as Crypto from 'expo-crypto'
 import AsyncStorage from '@react-native-async-storage/async-storage'
 import { normalizar as normalizarTexto } from '../utils/texto'
+import { DIAS_PRUEBA, AVISO_PRUEBA_DESDE, generarIdInstalacion, verificarCodigo } from './licencia'
 
 // Antes todos los datos vivían en un solo JSON de AsyncStorage que se reescribía
 // entero en cada venta. Con miles de ventas eso se vuelve lento y arriesgado, así
@@ -192,6 +193,61 @@ async function updateConfig(config) {
   return getConfig()
 }
 
+// ─── LICENCIA (pago único, 100% offline) ─────────────────────────────
+// Claves `lic_*` en la tabla config. Se excluyen del respaldo a propósito:
+// el código está atado a esta instalación, así que no debe viajar a otro
+// teléfono (ni revivir la prueba al restaurar una copia vieja).
+function asegurarLicencia(ahora = Date.now()) {
+  let id = leerConfig('lic_instal_id', null)
+  if (!id) {
+    id = generarIdInstalacion()
+    escribirConfig('lic_instal_id', id)
+  }
+  if (!leerConfig('lic_instalado_en', null)) {
+    escribirConfig('lic_instalado_en', new Date(ahora).toISOString())
+  }
+  // Se guarda lo máximo visto: si atrasan el reloj del teléfono, la prueba
+  // no se alarga (el cálculo usa el máximo entre hoy y lo registrado).
+  const ultimo = leerConfig('lic_ultimo_visto', null)
+  const hoyISO = new Date(ahora).toISOString()
+  if (!ultimo || hoyISO > ultimo) escribirConfig('lic_ultimo_visto', hoyISO)
+}
+
+// Solo matemática de fechas + config: sin cripto, se puede llamar en cada
+// venta sin costo. `restantes` 30→1 en prueba, 0 o menos bloqueada.
+function getEstadoLicencia(ahora = Date.now()) {
+  const instalacionId = leerConfig('lic_instal_id', null)
+  if (leerConfig('lic_estado', 'prueba') === 'activa') {
+    return { modo: 'activa', bloqueado: false, avisar: false, ultimoDia: false, restantes: null, diasUso: null, instalacionId }
+  }
+  const instaladoEn = leerConfig('lic_instalado_en', null)
+  if (!instaladoEn) return { modo: 'prueba', bloqueado: false, avisar: false, ultimoDia: false, restantes: DIAS_PRUEBA, diasUso: 1, instalacionId }
+  const ultimoVisto = leerConfig('lic_ultimo_visto', null)
+  const referencia = Math.max(ahora, Date.parse(ultimoVisto || 0), Date.parse(instaladoEn))
+  const dias = Math.max(0, Math.floor((referencia - Date.parse(instaladoEn)) / 86400000))
+  const restantes = DIAS_PRUEBA - dias
+  return {
+    modo: restantes > 0 ? 'prueba' : 'bloqueada',
+    bloqueado: restantes <= 0,
+    avisar: restantes <= AVISO_PRUEBA_DESDE && restantes > 1,
+    ultimoDia: restantes === 1,
+    restantes: Math.max(restantes, 0),
+    diasUso: dias + 1,
+    instalacionId,
+  }
+}
+
+async function activarLicencia(codigo) {
+  const id = leerConfig('lic_instal_id', null)
+  const ok = await verificarCodigo(id, codigo)
+  if (!ok) {
+    return { success: false, error: 'Ese código no vale para este teléfono. Revísalo letra por letra o pide tu código por WhatsApp.' }
+  }
+  escribirConfig('lic_estado', 'activa')
+  escribirConfig('lic_activada_en', new Date().toISOString())
+  return { success: true }
+}
+
 // ─── INIT + MIGRACIÓN ───────────────────────────────────────────────
 // `CREATE TABLE IF NOT EXISTS` no agrega columnas a una tabla que ya existe, así
 // que las columnas nuevas hay que sumarlas a mano en las bodegas que ya venían
@@ -204,6 +260,14 @@ const COLUMNAS_NUEVAS = [
   ['pagos_fiado', 'anulado', 'INTEGER NOT NULL DEFAULT 0'],
   ['productos', 'costo', 'REAL'],
   ['detalle_ventas', 'costo_unitario', 'REAL'],
+  // Compra por mayor: cuántas unidades de venta trae el bulto del proveedor
+  // ("caja" de 12 leches, "six-pack" de 6 gaseosas) y cómo se llama ese bulto.
+  // NULL = el producto se compra por unidades, como antes.
+  ['productos', 'bulto_unidades', 'INTEGER'],
+  ['productos', 'bulto_nombre', 'TEXT'],
+  // Código de barras del paquete grande (distinto al de la unidad).
+  // Escanearlo en el ingreso abre directo el producto en modo bulto.
+  ['productos', 'bulto_codigo', 'TEXT'],
 ]
 
 function agregarColumnasFaltantes() {
@@ -218,6 +282,7 @@ async function initDB() {
   sql = SQLite.openDatabaseSync(DB_NAME)
   sql.execSync(ESQUEMA)
   agregarColumnasFaltantes()
+  asegurarLicencia()
   if (!leerConfig('migrado_desde_asyncstorage', false)) {
     await migrarDesdeAsyncStorage()
   }
@@ -388,18 +453,28 @@ function getProductos() {
 // simplemente no suma a la ganancia, y la pantalla lo dice.
 const costoONulo = (v) => (v === '' || v === null || v === undefined || isNaN(parseFloat(v)) ? null : parseFloat(v))
 
-async function addProducto({ nombre, precio, stock, codigo, categoria, tipo_venta, unidad, costo }) {
+// La ficha NO lleva stock ni costo: el stock nace en 0 y se suma al ingresar
+// mercadería; el costo se pide con la factura delante (y prorrateado si viene
+// por bulto). Pedirlos acá es pedir números inventados.
+async function addProducto({ nombre, precio, codigo, categoria, tipo_venta, unidad, bulto_unidades, bulto_nombre, bulto_codigo }) {
   const creadoEn = new Date().toISOString()
+  const bu = parseInt(bulto_unidades)
+  const bc = String(bulto_codigo || '').trim()
   const r = sql.runSync(
-    'INSERT INTO productos (nombre, precio, stock, codigo, categoria, tipo_venta, unidad, costo, creado_en) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
-    nombre, parseFloat(precio), parseFloat(stock), codigo || null, categoria || 'General', tipo_venta || 'unidad', unidad || 'unidad', costoONulo(costo), creadoEn)
+    'INSERT INTO productos (nombre, precio, stock, codigo, categoria, tipo_venta, unidad, costo, bulto_unidades, bulto_nombre, bulto_codigo, creado_en) VALUES (?, ?, 0, ?, ?, ?, ?, NULL, ?, ?, ?, ?)',
+    nombre, parseFloat(precio), codigo || null, categoria || 'General', tipo_venta || 'unidad', unidad || 'unidad',
+    bu > 0 ? bu : null, bu > 0 ? String(bulto_nombre || 'bulto').slice(0, 20) : null, bu > 0 && bc ? bc : null, creadoEn)
   return sql.getFirstSync('SELECT * FROM productos WHERE id = ?', r.lastInsertRowId)
 }
 
-async function updateProducto({ id, nombre, precio, stock, codigo, categoria, tipo_venta, unidad, costo }) {
+async function updateProducto({ id, nombre, precio, codigo, categoria, tipo_venta, unidad, bulto_unidades, bulto_nombre, bulto_codigo }) {
+  // A propósito no toca stock ni costo: eso es abastecer, no la ficha.
+  const bu = parseInt(bulto_unidades)
+  const bc = String(bulto_codigo || '').trim()
   sql.runSync(
-    'UPDATE productos SET nombre = ?, precio = ?, stock = ?, codigo = ?, categoria = ?, tipo_venta = ?, unidad = ?, costo = ? WHERE id = ?',
-    nombre, parseFloat(precio), parseFloat(stock), codigo || null, categoria, tipo_venta || 'unidad', unidad || 'unidad', costoONulo(costo), id)
+    'UPDATE productos SET nombre = ?, precio = ?, codigo = ?, categoria = ?, tipo_venta = ?, unidad = ?, bulto_unidades = ?, bulto_nombre = ?, bulto_codigo = ? WHERE id = ?',
+    nombre, parseFloat(precio), codigo || null, categoria, tipo_venta || 'unidad', unidad || 'unidad',
+    bu > 0 ? bu : null, bu > 0 ? String(bulto_nombre || 'bulto').slice(0, 20) : null, bu > 0 && bc ? bc : null, id)
   return sql.getFirstSync('SELECT * FROM productos WHERE id = ?', id)
 }
 
@@ -504,6 +579,22 @@ async function deshacerIngreso(ingresoId) {
   })
 
   return { success: true }
+}
+
+// Guarda cómo viene el bulto del proveedor para este producto ("caja" de 12,
+// "six-pack" de 6...). Se pregunta una sola vez; después el ingreso lo usa
+// directo sin volver a preguntar.
+function setBulto(productoId, unidades, nombre, codigo) {
+  const u = parseInt(unidades)
+  if (!u || u <= 0) return
+  sql.runSync('UPDATE productos SET bulto_unidades = ?, bulto_nombre = ? WHERE id = ?',
+    u, String(nombre || 'bulto').slice(0, 20), productoId)
+  // El código del paquete solo se pisa si se mandó uno (para no borrarlo
+  // cuando el ingreso solo confirma el bulto que ya existía).
+  if (codigo !== undefined) {
+    const c = String(codigo || '').trim()
+    sql.runSync('UPDATE productos SET bulto_codigo = ? WHERE id = ?', c || null, productoId)
+  }
 }
 
 // Engancha un código de barras real a un producto que se cargó sin él (por
@@ -675,6 +766,11 @@ function getFiadosAntiguos(dias = 15) {
 
 // ─── VENTAS ─────────────────────────────────────────────────────────
 async function realizarVenta(items, montoRecibido, metodoPago = 'Efectivo', descuento = 0, tipoDescuento = 'ninguno', usuarioId = null, clienteId = null, esFiado = false, compradorNombre = null, compradorDniRuc = null) {
+  // Segunda capa del bloqueo (la primera es la pestaña Vender): si alguien
+  // llega hasta acá con la prueba vencida, la venta no se registra.
+  if (getEstadoLicencia().bloqueado) {
+    throw new Error('Se acabaron tus 30 días gratis. Activa tu licencia para seguir vendiendo — tus datos están intactos.')
+  }
   const subtotalBruto = items.reduce((s, i) => s + i.subtotal, 0)
   let descuentoMonto = 0
   if (tipoDescuento === 'porcentaje') descuentoMonto = subtotalBruto * (descuento / 100)
@@ -1082,7 +1178,16 @@ function getBackupJSON() {
     fiado: sql.getAllSync('SELECT * FROM fiado'),
     pagos_fiado: sql.getAllSync('SELECT * FROM pagos_fiado'),
     categorias_custom: sql.getAllSync('SELECT * FROM categorias_custom'),
-    config: getConfig(),
+    // La licencia no viaja en el respaldo: el código está atado a la
+    // instalación que lo pidió. Al cambiar de celular se genera un ID nuevo
+    // y el vendedor emite un código nuevo sin costo (el pago ya está hecho).
+    // De paso, restaurar una copia vieja nunca revive la prueba.
+    config: (() => {
+      const completa = getConfig()
+      const publica = {}
+      Object.keys(completa).forEach(k => { if (!k.startsWith('lic_')) publica[k] = completa[k] })
+      return publica
+    })(),
     setup_completado: isSetupCompletado(),
   }, null, 2)
 }
@@ -1126,8 +1231,9 @@ async function restaurarBackup(datos) {
         .forEach(tabla => sql.runSync(`DELETE FROM ${tabla}`))
 
       ;(datos.productos || []).forEach(p => sql.runSync(
-        'INSERT INTO productos (id, nombre, precio, stock, codigo, categoria, tipo_venta, unidad, creado_en) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
-        p.id, p.nombre, p.precio, p.stock, p.codigo ?? null, p.categoria ?? 'General', p.tipo_venta || 'unidad', p.unidad || 'unidad', p.creado_en || new Date().toISOString()))
+        'INSERT INTO productos (id, nombre, precio, stock, codigo, categoria, tipo_venta, unidad, creado_en, costo, bulto_unidades, bulto_nombre, bulto_codigo) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+        p.id, p.nombre, p.precio, p.stock, p.codigo ?? null, p.categoria ?? 'General', p.tipo_venta || 'unidad', p.unidad || 'unidad', p.creado_en || new Date().toISOString(),
+        p.costo ?? null, p.bulto_unidades ?? null, p.bulto_nombre ?? null, p.bulto_codigo ?? null))
 
       ;(datos.clientes || []).forEach(c => sql.runSync(
         'INSERT INTO clientes (id, nombre, telefono, referencia, dni_ruc, creado_en) VALUES (?, ?, ?, ?, ?, ?)',
@@ -1174,6 +1280,8 @@ export default {
   ingresarMercaderia, getIngresos, getDetalleIngreso, deshacerIngreso,
   getCategoriasCustom, addCategoriaCustom,
   getConfig, updateConfig, getBackupJSON, restaurarBackup, validarBackup,
+  getEstadoLicencia, activarLicencia,
+  setBulto,
   getClientes, addCliente, updateCliente, buscarCliente,
   getFiadoCliente, addFiado, abonarACliente, getResumenFiado, getFiadosAntiguos, anularPagoFiado,
   realizarVenta, getHistorialVentas, getDetalleVenta, getResumenHoy, getResumenPeriodo, getGanancia,

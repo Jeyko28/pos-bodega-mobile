@@ -11,6 +11,8 @@ import { CATEGORIAS_BASE } from '../data/categorias'
 import { usePieDeHoja } from '../utils/teclado'
 import { chips } from '../theme/chips'
 import { coincide } from '../utils/texto'
+import { PRESETS_BULTO, sugerirBulto } from '../data/bultos'
+import { useLetra } from '../context/LetraContext'
 
 const fmt = (n) => `S/ ${Number(n).toFixed(2)}`
 
@@ -35,12 +37,14 @@ const UNIDADES_GRANEL = [
 
 export default function ProductosScreen() {
   const { alturaTeclado, espacioAbajo } = usePieDeHoja()
+  const { tx } = useLetra()
+  const styles = crearStyles(tx)
   const [productos, setProductos] = useState([])
   const [busqueda, setBusqueda] = useState('')
   const [categoriaFiltro, setCategoriaFiltro] = useState(null)
   const [modal, setModal] = useState(false)
   const [editando, setEditando] = useState(null)
-  const [form, setForm] = useState({ nombre: '', precio: '', stock: '', categoria: '', tipo_venta: 'unidad', unidad: 'kg', codigo: '', costo: '' })
+  const [form, setForm] = useState({ nombre: '', precio: '', categoria: '', tipo_venta: 'unidad', unidad: 'kg', codigo: '', bultoNombre: '', bultoUnidades: '', bultoCodigo: '' })
   const [scanner, setScanner] = useState(false)
   const [catalogo, setCatalogo] = useState(false)
   const [ingreso, setIngreso] = useState(false)
@@ -71,13 +75,13 @@ export default function ProductosScreen() {
 
   function abrirNuevo() {
     setEditando(null)
-    setForm({ nombre: '', precio: '', stock: '', categoria: '', tipo_venta: 'unidad', unidad: 'kg', codigo: '', costo: '' })
+    setForm({ nombre: '', precio: '', categoria: '', tipo_venta: 'unidad', unidad: 'kg', codigo: '', bultoNombre: '', bultoUnidades: '', bultoCodigo: '' })
     setModal(true)
   }
 
   function abrirEditar(p) {
     setEditando(p)
-    setForm({ nombre: p.nombre, precio: String(p.precio), stock: String(p.stock), categoria: p.categoria || '', tipo_venta: p.tipo_venta, unidad: p.unidad || 'kg', codigo: p.codigo || '', costo: p.costo == null ? '' : String(p.costo) })
+    setForm({ nombre: p.nombre, precio: String(p.precio), categoria: p.categoria || '', tipo_venta: p.tipo_venta, unidad: p.unidad || 'kg', codigo: p.codigo || '', bultoNombre: p.bulto_nombre || '', bultoUnidades: p.bulto_unidades ? String(p.bulto_unidades) : '', bultoCodigo: p.bulto_codigo || '' })
     setModal(true)
   }
 
@@ -86,11 +90,24 @@ export default function ProductosScreen() {
     setScanner(false)
   }
 
-  const formValido = form.nombre.trim() && form.precio && form.stock && form.categoria
+  // La ficha no pide stock ni costo: eso es abastecer y se hace al ingresar
+  // mercadería (con la factura delante). Acá solo qué es y a cuánto se vende.
+  const formValido = form.nombre.trim() && form.precio && form.categoria
 
   async function guardar() {
     if (!formValido) return
-    const datos = { ...form, unidad: form.tipo_venta === 'granel' ? (form.unidad || 'kg') : 'unidad' }
+    const bu = parseInt(form.bultoUnidades)
+    const datos = {
+      nombre: form.nombre.trim(),
+      precio: form.precio,
+      categoria: form.categoria,
+      tipo_venta: form.tipo_venta,
+      unidad: form.tipo_venta === 'granel' ? (form.unidad || 'kg') : 'unidad',
+      codigo: form.codigo.trim(),
+      bulto_unidades: bu > 0 ? bu : null,
+      bulto_nombre: bu > 0 ? (form.bultoNombre.trim().toLowerCase() || 'bulto') : null,
+      bulto_codigo: bu > 0 ? form.bultoCodigo.trim() : null,
+    }
     if (editando) {
       await db.updateProducto({ id: editando.id, ...datos })
     } else {
@@ -189,7 +206,7 @@ export default function ProductosScreen() {
       />
 
       <Modal visible={catalogo} animationType="slide" onRequestClose={() => setCatalogo(false)}>
-        <CatalogoBase onCerrar={() => setCatalogo(false)} onAgregados={() => setProductos(db.getProductos())} />
+        <CatalogoBase onCerrar={() => setCatalogo(false)} onAgregados={() => setProductos(db.getProductos())} onIrAIngreso={() => { setCatalogo(false); setIngreso(true) }} />
       </Modal>
 
       <Modal visible={ingreso} animationType="slide" onRequestClose={() => setIngreso(false)}>
@@ -205,13 +222,35 @@ export default function ProductosScreen() {
           <ScrollView style={styles.modalScrollLimite} contentContainerStyle={[styles.modalCaja, { paddingBottom: 20 + espacioAbajo }]} keyboardShouldPersistTaps="handled">
             <Text style={styles.modalTitulo}>{editando ? 'Editar producto' : 'Nuevo producto'}</Text>
             <TextInput style={styles.input} placeholder="Nombre" placeholderTextColor={colors.placeholder} value={form.nombre} onChangeText={v => setForm(f => ({ ...f, nombre: v }))} />
-            <View style={styles.filaCodigo}>
-              <TextInput style={[styles.input, { flex: 1 }]} placeholder="Precio de venta" placeholderTextColor={colors.placeholder} keyboardType="decimal-pad" value={form.precio} onChangeText={v => setForm(f => ({ ...f, precio: v }))} />
-              {/* Opcional: sin costo el producto no suma a la ganancia del día,
-                  pero se puede vender igual. Exigirlo sería peor que no tenerlo. */}
-              <TextInput style={[styles.input, { flex: 1 }]} placeholder="Te cuesta (opc.)" placeholderTextColor={colors.placeholder} keyboardType="decimal-pad" value={form.costo} onChangeText={v => setForm(f => ({ ...f, costo: v }))} />
+            <TextInput style={styles.input} placeholder="Precio de venta" placeholderTextColor={colors.placeholder} keyboardType="decimal-pad" value={form.precio} onChangeText={v => setForm(f => ({ ...f, precio: v }))} />
+            {/* El bulto es parte de la ficha (cómo viene del mayorista); el
+                stock y el costo se ponen al ingresar mercadería. */}
+            <Text style={styles.etiquetaCategoria}>¿Viene por bulto del mayorista? (opcional)</Text>
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} style={chips.scroll} contentContainerStyle={chips.contenido}>
+              <TouchableOpacity onPress={() => setForm(f => ({ ...f, bultoUnidades: '', bultoNombre: '' }))}
+                style={[chips.chip, !parseInt(form.bultoUnidades) && chips.chipActivo]}>
+                <Text style={[chips.texto, !parseInt(form.bultoUnidades) && chips.textoActivo]}>Por unidades</Text>
+              </TouchableOpacity>
+              {PRESETS_BULTO.map((p, i) => {
+                const activo = parseInt(form.bultoUnidades) === p.unidades && form.bultoNombre === p.nombre
+                return (
+                  <TouchableOpacity key={i} onPress={() => setForm(f => ({ ...f, bultoUnidades: String(p.unidades), bultoNombre: p.nombre }))}
+                    style={[chips.chip, activo && chips.chipActivo]}>
+                    <Text style={[chips.texto, activo && chips.textoActivo]}>{p.nombre} {p.unidades}</Text>
+                  </TouchableOpacity>
+                )
+              })}
+            </ScrollView>
+            <View style={styles.filaNuevaCategoria}>
+              <TextInput style={[styles.input, { flex: 1 }]} placeholder="Trae... (ej: 15)" placeholderTextColor={colors.placeholder}
+                keyboardType="number-pad" value={form.bultoUnidades} onChangeText={v => setForm(f => ({ ...f, bultoUnidades: v }))} />
+              <TextInput style={[styles.input, { flex: 1 }]} placeholder="caja, six-pack..." placeholderTextColor={colors.placeholder}
+                value={form.bultoNombre} onChangeText={v => setForm(f => ({ ...f, bultoNombre: v }))} />
             </View>
-            <TextInput style={styles.input} placeholder="Stock" placeholderTextColor={colors.placeholder} keyboardType="decimal-pad" value={form.stock} onChangeText={v => setForm(f => ({ ...f, stock: v }))} />
+            {!!parseInt(form.bultoUnidades) && (
+              <TextInput style={styles.input} placeholder="Código del paquete (opcional)" placeholderTextColor={colors.placeholder}
+                keyboardType="number-pad" value={form.bultoCodigo} onChangeText={v => setForm(f => ({ ...f, bultoCodigo: v }))} />
+            )}
             <View style={styles.filaCodigo}>
               <TextInput style={[styles.input, { flex: 1 }]} placeholder="Código de barras (opcional)" placeholderTextColor={colors.placeholder}
                 value={form.codigo} onChangeText={v => setForm(f => ({ ...f, codigo: v }))} />
@@ -222,7 +261,16 @@ export default function ProductosScreen() {
             <Text style={styles.etiquetaCategoria}>Categoría</Text>
             <ScrollView horizontal showsHorizontalScrollIndicator={false} style={chips.scroll} contentContainerStyle={chips.contenido}>
               {CATEGORIAS.map(c => (
-                <TouchableOpacity key={c.id} onPress={() => setForm(f => ({ ...f, categoria: c.id }))}
+                <TouchableOpacity key={c.id} onPress={() => setForm(f => {
+                  // Al elegir categoría se sugiere su bulto típico (solo si
+                  // aún no eligió uno): Lácteos→caja 12, Bebidas→six-pack 6...
+                  const nf = { ...f, categoria: c.id }
+                  if (!parseInt(nf.bultoUnidades)) {
+                    const sug = sugerirBulto(c.id)
+                    if (sug) { nf.bultoUnidades = String(sug.unidades); nf.bultoNombre = sug.nombre }
+                  }
+                  return nf
+                })}
                   style={[chips.chip, form.categoria === c.id && chips.chipActivo]}>
                   <Text style={chips.icono}>{c.icon}</Text>
                   <Text style={[chips.texto, form.categoria === c.id && chips.textoActivo]}>{c.id}</Text>
@@ -286,51 +334,52 @@ export default function ProductosScreen() {
   )
 }
 
-const styles = StyleSheet.create({
+// Los tamaños de letra pasan por tx() para el interruptor "Letra grande".
+const crearStyles = (tx) => ({
   root: { flex: 1, backgroundColor: colors.bg },
   header: { flexDirection: 'row', gap: 8, padding: 12 },
   buscador: { flex: 1, backgroundColor: colors.input, borderWidth: 1, borderColor: colors.border, borderRadius: 10, padding: 12, color: colors.text },
   botonIngreso: { marginHorizontal: 12, marginBottom: 4, paddingVertical: 12, paddingHorizontal: 14, borderRadius: 10, borderWidth: 1, borderColor: colors.borderStrong, backgroundColor: colors.card, alignItems: 'center' },
-  botonIngresoTexto: { color: colors.text, fontWeight: '700', fontSize: 14 },
-  botonIngresoAyuda: { color: colors.textMuted, fontSize: 11, marginTop: 2 },
+  botonIngresoTexto: { color: colors.text, fontWeight: '700', fontSize: tx(14) },
+  botonIngresoAyuda: { color: colors.textMuted, fontSize: tx(13), marginTop: 2 },
   botonNuevo: { backgroundColor: colors.primary, borderRadius: 10, paddingHorizontal: 16, justifyContent: 'center' },
   botonNuevoTexto: { color: colors.primaryText, fontWeight: '700' },
   fila: { flexDirection: 'row', alignItems: 'center', backgroundColor: colors.card, borderRadius: 10, padding: 12, marginBottom: 8, borderWidth: 1, borderColor: colors.border },
-  nombre: { color: colors.text, fontWeight: '600', fontSize: 14 },
-  detalle: { color: colors.textMuted, fontSize: 12, marginTop: 2 },
+  nombre: { color: colors.text, fontWeight: '600', fontSize: tx(14) },
+  detalle: { color: colors.textMuted, fontSize: tx(13), marginTop: 2 },
   stockBajo: { color: colors.warning, fontWeight: '700' },
   stockCero: { color: colors.danger, fontWeight: '700' },
   chipAlerta: { borderColor: colors.warning, backgroundColor: colors.warningBg },
   chipAlertaActivo: { borderWidth: 2 },
   textoAlerta: { color: colors.warning },
-  precio: { color: colors.accent, fontWeight: '700', fontSize: 15 },
-  vacio: { color: colors.textMuted, textAlign: 'center', fontSize: 14 },
+  precio: { color: colors.accent, fontWeight: '700', fontSize: tx(15) },
+  vacio: { color: colors.textMuted, textAlign: 'center', fontSize: tx(14) },
   vacioCaja: { padding: 24, alignItems: 'center', gap: 14 },
-  vacioAyuda: { color: colors.textMuted, textAlign: 'center', fontSize: 12, lineHeight: 17 },
+  vacioAyuda: { color: colors.textMuted, textAlign: 'center', fontSize: tx(13), lineHeight: 17 },
   botonCatalogo: { backgroundColor: colors.primary, borderRadius: 10, paddingVertical: 14, paddingHorizontal: 20, alignSelf: 'stretch', alignItems: 'center' },
-  botonCatalogoTexto: { color: colors.primaryText, fontWeight: '700', fontSize: 14 },
+  botonCatalogoTexto: { color: colors.primaryText, fontWeight: '700', fontSize: tx(14) },
   enlaceCatalogo: { paddingVertical: 16, alignItems: 'center' },
-  enlaceCatalogoTexto: { color: colors.accent, fontWeight: '700', fontSize: 13 },
+  enlaceCatalogoTexto: { color: colors.accent, fontWeight: '700', fontSize: tx(13) },
   modalFondo: { flex: 1, backgroundColor: colors.overlay, justifyContent: 'flex-end' },
   modalCaja: { backgroundColor: colors.card, borderTopLeftRadius: 20, borderTopRightRadius: 20, padding: 20, gap: 10 },
   modalScrollLimite: { flexGrow: 0, maxHeight: '85%' },
-  modalTitulo: { color: colors.text, fontWeight: '700', fontSize: 16, marginBottom: 4 },
-  input: { backgroundColor: colors.input, borderWidth: 1, borderColor: colors.border, borderRadius: 10, padding: 12, color: colors.text, fontSize: 15 },
+  modalTitulo: { color: colors.text, fontWeight: '700', fontSize: tx(16), marginBottom: 4 },
+  input: { backgroundColor: colors.input, borderWidth: 1, borderColor: colors.border, borderRadius: 10, padding: 12, color: colors.text, fontSize: tx(15) },
   filaCodigo: { flexDirection: 'row', gap: 8, alignItems: 'center' },
   botonEscanear: { width: 46, height: 46, borderRadius: 10, backgroundColor: colors.accentBg, borderWidth: 1, borderColor: colors.primary, alignItems: 'center', justifyContent: 'center' },
-  botonEscanearTexto: { fontSize: 20 },
-  etiquetaCategoria: { color: colors.textMuted, fontSize: 11, fontWeight: '700', textTransform: 'uppercase', letterSpacing: 0.5, marginTop: 4 },
-  categoriaTextoNueva: { color: colors.textMuted, fontSize: 13, fontWeight: '600' },
+  botonEscanearTexto: { fontSize: tx(20) },
+  etiquetaCategoria: { color: colors.textMuted, fontSize: tx(13), fontWeight: '700', textTransform: 'uppercase', letterSpacing: 0.5, marginTop: 4 },
+  categoriaTextoNueva: { color: colors.textMuted, fontSize: tx(13), fontWeight: '600' },
   filaNuevaCategoria: { flexDirection: 'row', gap: 8, alignItems: 'center', marginTop: -2 },
   botonConfirmarCategoria: { backgroundColor: colors.primary, borderRadius: 10, paddingHorizontal: 12, height: 46, alignItems: 'center', justifyContent: 'center' },
-  botonConfirmarCategoriaTexto: { color: colors.primaryText, fontWeight: '700', fontSize: 14 },
+  botonConfirmarCategoriaTexto: { color: colors.primaryText, fontWeight: '700', fontSize: tx(14) },
   botonCancelarCategoria: { width: 46, height: 46, borderRadius: 10, borderWidth: 1, borderColor: colors.border, alignItems: 'center', justifyContent: 'center' },
-  botonCancelarCategoriaTexto: { color: colors.textMuted, fontWeight: '700', fontSize: 16 },
-  ayudaUnidad: { color: colors.textMuted, fontSize: 11, lineHeight: 16 },
+  botonCancelarCategoriaTexto: { color: colors.textMuted, fontWeight: '700', fontSize: tx(16) },
+  ayudaUnidad: { color: colors.textMuted, fontSize: tx(13), lineHeight: 16 },
   tipoVentaFila: { flexDirection: 'row', gap: 8 },
   tipoVentaBoton: { flex: 1, padding: 12, borderRadius: 10, borderWidth: 1, borderColor: colors.border, alignItems: 'center' },
   tipoVentaBotonActivo: { backgroundColor: colors.accentBg, borderColor: colors.primary },
-  tipoVentaTexto: { color: colors.textMuted, fontSize: 13, fontWeight: '600' },
+  tipoVentaTexto: { color: colors.textMuted, fontSize: tx(13), fontWeight: '600' },
   tipoVentaTextoActivo: { color: colors.accent },
   filaBotones: { flexDirection: 'row', gap: 10, marginTop: 8 },
   botonGhost: { flex: 1, padding: 14, borderRadius: 10, borderWidth: 1, borderColor: colors.border, alignItems: 'center' },

@@ -100,7 +100,7 @@ export function construirAvisos({ bajoStock = [], fiadosAntiguos = [] }) {
 
 const styles = StyleSheet.create({
   punto: { position: 'absolute', top: 0, right: 8, minWidth: 16, height: 16, paddingHorizontal: 3, borderRadius: 999, backgroundColor: colors.warning, alignItems: 'center', justifyContent: 'center' },
-  puntoTexto: { color: '#fff', fontSize: 10, fontWeight: '800', lineHeight: 13 },
+  puntoTexto: { color: '#fff', fontSize: 11, fontWeight: '800', lineHeight: 13 },
 
   fondo: { flex: 1, backgroundColor: colors.overlay, justifyContent: 'center', padding: 24 },
   tarjetaAvisos: { backgroundColor: colors.card, borderRadius: 16, padding: 20 },
@@ -108,7 +108,7 @@ const styles = StyleSheet.create({
   aviso: { flexDirection: 'row', alignItems: 'flex-start', gap: 10, paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: colors.border },
   avisoIcono: { fontSize: 18, lineHeight: 24 },
   avisoTitulo: { color: colors.text, fontWeight: '600', fontSize: 14 },
-  avisoDetalle: { color: colors.textMuted, fontSize: 12, marginTop: 2 },
+  avisoDetalle: { color: colors.textMuted, fontSize: 13, marginTop: 2 },
   vacio: { color: colors.textMuted, textAlign: 'center', paddingVertical: 24, fontSize: 13 },
 
   botonCerrar: { marginTop: 14, paddingVertical: 12, borderRadius: 10, borderWidth: 1, borderColor: colors.border, alignItems: 'center' },

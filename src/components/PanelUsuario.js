@@ -235,14 +235,14 @@ const styles = StyleSheet.create({
   perfil: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingBottom: 6 },
   avatar: { width: 48, height: 48, borderRadius: 999, backgroundColor: colors.accentBg, alignItems: 'center', justifyContent: 'center' },
   nombre: { color: colors.text, fontWeight: '700', fontSize: 16 },
-  detalle: { color: colors.textMuted, fontSize: 12 },
+  detalle: { color: colors.textMuted, fontSize: 13 },
 
   opcion: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 14, paddingHorizontal: 14, borderRadius: 10, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.bg },
   opcionSalir: { borderColor: colors.danger, backgroundColor: colors.dangerBg },
   opcionTexto: { flex: 1, color: colors.text, fontSize: 14, fontWeight: '600' },
 
   titulo: { color: colors.text, fontWeight: '700', fontSize: 16 },
-  ayuda: { color: colors.textMuted, fontSize: 12, lineHeight: 17 },
+  ayuda: { color: colors.textMuted, fontSize: 13, lineHeight: 17 },
   input: { backgroundColor: colors.input, borderWidth: 1, borderColor: colors.border, borderRadius: 10, padding: 12, color: colors.text, fontSize: 15 },
 
   filaUsuario: { flexDirection: 'row', alignItems: 'center', paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: colors.border },

@@ -38,7 +38,7 @@ npx eas-cli build --platform android --profile development
 
 Genera un APK instalable directo (sin Play Store) con `expo-dev-client`, que se conecta a Metro igual que Expo Go pero con el código nativo del proyecto (incluye SQLite, cámara, y lo que se vaya agregando). El keystore de firma lo genera y gestiona EAS en la nube — no hay archivo de keystore local que cuidar.
 
-Cualquier cambio en `app.json` bajo `android`/`ios` (permisos, `scheme`, plugins nuevos) es nativo: no basta con recargar la app, hay que compilar un build nuevo.
+Cualquier cambio en `app.json` bajo `android`/`ios` (permisos, `scheme`, plugins nuevos) es nativo: no basta con recargar la app, hay que compilar un build nuevo. Lo mismo al agregar un paquete con código nativo (ej: `expo-clipboard`): el APK dev instalado no lo trae hasta recompilar.
 
 ---
 
@@ -152,10 +152,60 @@ Cada una costó tiempo de depuración o fue una decisión de producto deliberada
 
 ## Estado
 
-**Fase 1 (actual): app autónoma.** Setup, login por usuario, productos con escaneo de código de barras, catálogo base de bodega peruana, ingreso de mercadería con deshacer, venta con carritos simultáneos y escaneo continuo, venta a granel por peso o por monto, fiado con abonos parciales y cobranza por WhatsApp, apertura y cierre de caja con salidas de efectivo y descuadre, anulación y corrección de ventas, cobro de montos sueltos, costo de compra y ganancia aproximada, historial con filtros, alertas de stock, ticket en PDF y respaldo local, en carpeta pública y en Google Drive con restauración.
+**Fase 1 (actual): app autónoma.** Setup, mini tutorial de 3 pasos (~30 segundos, una sola vez tras crear la bodega), login por usuario, productos con escaneo de código de barras, catálogo base de bodega peruana, ingreso de mercadería con deshacer (por unidades o por bulto del mayorista: caja, six-pack, paquete, fardo o saco, con conversión automática a unidades y prorrateo del costo; se pregunta una sola vez por producto; el escáner corrido suma bultos, el preview muestra el total para cotejar la factura y avisa por nombre las filas sin cantidad antes de guardar). El bulto tiene su propio código de barras (distinto al de la unidad): escanearlo en el ingreso abre directo el producto en modo bulto, y si se escanea vendiendo avisa que es el paquete grande. La ficha del producto (alta) no pide stock ni costo —eso es abastecer— pero sí el bulto opcional con su código; el catálogo base avisa que sus precios son referenciales y al terminar ofrece ingresar lo que hay en el estante, venta con carritos simultáneos y escaneo continuo, venta a granel por peso o por monto, fiado con abonos parciales y cobranza por WhatsApp, apertura y cierre de caja con salidas de efectivo y descuadre, anulación y corrección de ventas, cobro de montos sueltos, costo de compra y ganancia aproximada, historial con filtros, alertas de stock, ticket en PDF y respaldo local, en carpeta pública y en Google Drive con restauración. Textos con piso mínimo de 13 e interruptor "Letra grande" (×1.2) en Ajustes → Legibilidad para vista cansada: escala Vender, Productos, Ingreso, Clientes e Historial (`src/context/LetraContext.js`, flag `letra_grande` en config).
 
-Lo que el respaldo **no** incluye: `ingresos`, `detalle_ingresos` ni `sesiones_caja`. Son historial operativo del teléfono, no datos del negocio que deban viajar a otro equipo — pero significa que al cambiar de celular esos historiales no se recuperan.
+Lo que el respaldo **no** incluye: `ingresos`, `detalle_ingresos` ni `sesiones_caja`. Son historial operativo del teléfono, no datos del negocio que deban viajar a otro equipo — pero significa que al cambiar de celular esos historiales no se recuperan. Tampoco viajan las claves `lic_*`: el código de activación está atado a la instalación que lo pidió.
 
 **Fase 2 y 3 (no empezadas):** la PC como servidor local, sincronización por WiFi entre celular y escritorio, y modo contingencia cuando se cae la conexión. El diseño está discutido pero no implementado.
 
 Fuera de alcance por ahora: facturación electrónica SUNAT, importar respaldos, ofertas y promociones, control de vencimientos.
+
+---
+
+## Licencia (pago único offline, verificado 2026-09-09)
+
+30 días gratis desde la instalación. Última semana con aviso ámbar en Vender, último día con aviso fuerte, día 31 se bloquea **solo la venta**: productos, clientes, fiados, historial, caja y respaldos siguen abiertos. Un solo pago, para siempre, sin mensualidad.
+
+- **Código atado a la instalación.** Al arrancar se genera `lic_instal_id` (8 letras, `Crypto.getRandomBytes`) y `lic_instalado_en`. El código de activación son 16 letras (4×4) = 80 bits del `HMAC-SHA256(secreto, "pos-bodega:<ID>")` en Base32 Crockford. Solo sirve en el teléfono que lo pidió: si lo prestan, no les funciona.
+- **Sin servidor.** La app verifica offline con el secreto embebido (`src/data/licencia.js`). El HMAC está armado a mano porque `expo-crypto` no trae HMAC: usa `Crypto.digest()` sobre bytes (no `digestStringAsync`, que rompería los pads binarios) y UTF-8 manual (Hermes no garantiza `TextEncoder`). Verificado contra el vector RFC 4231 caso 2 y contra `node:crypto`.
+- **Flujo vendedor.** La bodeguera toca "Pedir mi código por WhatsApp" (botón `wa.me` al 51981487284 con su ID ya escrito; el número nunca se muestra en pantalla). El vendedor corre `node tools/generar-codigo.js <ID>` y le devuelve el código por el mismo chat. Cambio de celular con pago hecho = código nuevo sin costo (el respaldo en Drive trae los datos; la licencia no viaja).
+- **Pegar sin tipear.** Si la bodeguera copió el código del WhatsApp, la pantalla lo detecta del portapapeles (`expo-clipboard`: auto-relleno al abrir/enfocar + botón "Pegar código del WhatsApp") y solo toca Activar. Tipear 16 letras con vista cansada es pedir un error.
+- **Anti-trampa de reloj.** Se guarda `lic_ultimo_visto` (lo máximo visto) y el cálculo usa `max(hoy, ultimo_visto)`: atrasar la fecha no alarga la prueba.
+- **Capas de bloqueo.** `MainTabs` reemplaza Vender por `LicenciaScreen` al vencer + `realizarVenta` lanza error si `getEstadoLicencia().bloqueado` (el POS lo muestra en el Alert de cobro).
+- **Soporte.** Tarjeta "Ayuda y soporte" en Ajustes + botón en `LicenciaScreen`, mismo WhatsApp.
+- **Límites honestos.** Sin servidor no hay revocación ni amarre inviolable: esto frena al usuario honesto, no a quien desarme el APK (JS sin ofuscar, DB sin cifrar). Reinstalar genera ID nuevo = prueba nueva; se asume como costo de reposición, no como agujero a perseguir.
+
+---
+
+## Origen y forma de trabajo
+
+- Proyecto iniciado en Claude Code; desde 2026-09-09 se trabaja en opencode (Muse Spark).
+- Todo cambio funcional se documenta aquí, en la sección Estado.
+
+## Ciclo dev con emulador (verificado 2026-09-09)
+
+Entorno Windows + PowerShell 5.1:
+
+- `npm.ps1`/`npx.ps1` están bloqueados por ExecutionPolicy → usar
+  `& "C:\Program Files\nodejs\npx.cmd"` y `& "C:\Program Files\nodejs\npm.cmd"`.
+  Node v24.15.0, Expo SDK 57.
+- Android Studio instalado y SDK en `%LOCALAPPDATA%\Android\Sdk`, pero `adb`/`emulator`
+  NO están en PATH → usar rutas completas (`platform-tools\adb.exe`, `emulator\emulator.exe`).
+- AVD `Pixel_6a` (android-34, PlayStore): el skin `pixel_6a` no existe en el SDK
+  (`ERROR | unknown skin name 'pixel_6a'`) → arrancar con `-skin 1080x2400`
+  (la doc del emulador acepta `<ancho>x<alto>` como skin sin adornos).
+- AVD `GamaMedia` (copia del anterior, `-skin 720x1600`): pantalla chica de gama
+  media real para verificar que nada se desborda con letra normal y grande.
+- Metro corre por defecto en :8081. Si está caído, el iPhone con Expo Go no conecta.
+
+Pasos:
+
+1. Arrancar AVD: `emulator -avd Pixel_6a -no-snapshot -skin 1080x2400` con `Start-Process`
+   (a veces el shell que lo lanza muere con `ChildProcess.kill`, pero el emulador
+   igual queda vivo: verificar con `adb devices`).
+2. `adb reverse tcp:8081 tcp:8081` para que el emulador vea a Metro.
+3. Metro: `Start-Process npx.cmd expo start` (verificar con
+   `Get-NetTCPConnection -LocalPort 8081` y `Get-CimInstance Win32_Process`).
+4. Abrir la app instalada (`com.pos.bodega`, build dev):
+   `adb shell am start -a android.intent.action.VIEW -d 'posbodega://expo-development-client/?url=http%3A%2F%2Flocalhost%3A8081'`
+5. Verificar UI con captura: `adb exec-out screencap -p > pantalla.png` y leer la imagen.

@@ -4,6 +4,7 @@ import { createBottomTabNavigator } from '@react-navigation/bottom-tabs'
 import { Ionicons } from '@expo/vector-icons'
 import * as Haptics from 'expo-haptics'
 import POSScreen from '../screens/POSScreen'
+import LicenciaScreen from '../screens/LicenciaScreen'
 import ProductosScreen from '../screens/ProductosScreen'
 import ClientesScreen from '../screens/ClientesScreen'
 import HistorialScreen from '../screens/HistorialScreen'
@@ -11,6 +12,7 @@ import ConfiguracionScreen from '../screens/ConfiguracionScreen'
 import db from '../data/db'
 import { BotonNotificaciones, construirAvisos } from '../components/HeaderAcciones'
 import PanelUsuario from '../components/PanelUsuario'
+import { useLetra } from '../context/LetraContext'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { colors } from '../theme/colors'
 
@@ -53,13 +55,18 @@ function TabIcon({ ruta, focused, color }) {
 
 export default function MainTabs() {
   const insets = useSafeAreaInsets()
+  const { tx } = useLetra()
   const [bajoStock, setBajoStock] = useState(0)
   const [avisos, setAvisos] = useState([])
+  // Vencida la prueba, la pestaña Vender muestra la licencia: el resto
+  // (productos, clientes, fiados, historial, ajustes) sigue abierto.
+  const [ventasBloqueadas, setVentasBloqueadas] = useState(() => db.getEstadoLicencia().bloqueado)
 
   function actualizarAlertas() {
     const productos = db.getProductosBajoStock()
     setBajoStock(productos.length)
     setAvisos(construirAvisos({ bajoStock: productos, fiadosAntiguos: db.getFiadosAntiguos() }))
+    setVentasBloqueadas(db.getEstadoLicencia().bloqueado)
   }
 
   useEffect(() => { actualizarAlertas() }, [])
@@ -85,12 +92,16 @@ export default function MainTabs() {
         tabBarStyle: { backgroundColor: colors.card, borderTopColor: colors.border, height: 64 + insets.bottom, paddingBottom: insets.bottom + 10 },
         tabBarActiveTintColor: colors.accent,
         tabBarInactiveTintColor: colors.textMuted,
-        tabBarLabelStyle: { fontSize: 11, fontWeight: '600' },
+        tabBarLabelStyle: { fontSize: tx(12), fontWeight: '600' },
         tabBarItemStyle: { paddingTop: 6 },
         tabBarIcon: ({ focused, color }) => <TabIcon ruta={route.name} focused={focused} color={color} />,
       })}
     >
-      <Tab.Screen name="POS" component={POSScreen} options={{ title: 'Vender' }} />
+      <Tab.Screen name="POS" options={{ title: 'Vender' }}>
+        {() => ventasBloqueadas
+          ? <LicenciaScreen onActivada={() => setVentasBloqueadas(false)} />
+          : <POSScreen />}
+      </Tab.Screen>
       <Tab.Screen name="Productos" component={ProductosScreen} options={{
         tabBarBadge: bajoStock > 0 ? bajoStock : undefined,
         tabBarBadgeStyle: { backgroundColor: colors.warning, color: '#fff' },

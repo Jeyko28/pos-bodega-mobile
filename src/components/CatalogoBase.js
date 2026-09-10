@@ -12,7 +12,7 @@ import { normalizar } from '../utils/texto'
 
 // Se renderiza como contenido de un <Modal> que ya está abierto (nunca abre uno
 // propio): dos <Modal> nativos a la vez rompen en iOS.
-export default function CatalogoBase({ onCerrar, onAgregados }) {
+export default function CatalogoBase({ onCerrar, onAgregados, onIrAIngreso }) {
   // Es un Modal a pantalla completa, así que dibuja por debajo de la barra de
   // estado y del indicador inferior: hay que respetar esos márgenes a mano.
   const insets = useSafeAreaInsets()
@@ -56,8 +56,12 @@ export default function CatalogoBase({ onCerrar, onAgregados }) {
     const r = await db.addProductosLote(elegidos)
     setGuardando(false)
     onAgregados?.(r)
-    Alert.alert('✓ Listo', `Se agregaron ${r.agregados} productos.${r.omitidos ? ` ${r.omitidos} ya existían.` : ''}\n\nRevisa el stock de cada uno: entran en 0.`)
-    onCerrar()
+    // El alta no es el abastecer: entran en 0 y el puente lleva directo a
+    // ingresar lo que hay en el estante, que es el paso que siempre faltaba.
+    Alert.alert('✓ Listo', `Se agregaron ${r.agregados} productos.${r.omitidos ? ` ${r.omitidos} ya existían.` : ''}\n\nEntraron sin stock. ¿Ingresamos lo que tienes en el estante?`, [
+      { text: 'Después', style: 'cancel', onPress: onCerrar },
+      { text: 'Ingresar mercadería', onPress: () => onIrAIngreso?.() || onCerrar() },
+    ])
   }
 
   return (
@@ -65,7 +69,7 @@ export default function CatalogoBase({ onCerrar, onAgregados }) {
       <View style={[styles.encabezado, { paddingTop: insets.top + 14 }]}>
         <Text style={styles.titulo}>Productos comunes de bodega</Text>
         <Text style={styles.ayuda}>
-          Marca los que vendes y ajusta el precio. Entran sin código de barras: el código se guarda solo la primera vez que escanees ese producto en tu tienda.
+          Marca los que vendes y pon tu precio: los que vienen escritos son de referencia y cambian por zona y mes. Entran sin stock y sin código de barras.
         </Text>
       </View>
 
@@ -149,21 +153,21 @@ const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: colors.bg },
   encabezado: { padding: 16, paddingBottom: 4, backgroundColor: colors.card, borderBottomWidth: 1, borderBottomColor: colors.border },
   titulo: { color: colors.text, fontWeight: '700', fontSize: 17 },
-  ayuda: { color: colors.textMuted, fontSize: 12, lineHeight: 17, marginTop: 6 },
+  ayuda: { color: colors.textMuted, fontSize: 13, lineHeight: 17, marginTop: 6 },
 
   filaCategorias: { paddingTop: 12 },
   barraSeleccion: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 16, paddingBottom: 10 },
   marcarTodosTexto: { color: colors.accent, fontWeight: '700', fontSize: 13 },
-  contadorSeleccion: { color: colors.textMuted, fontSize: 12, fontWeight: '600' },
+  contadorSeleccion: { color: colors.textMuted, fontSize: 13, fontWeight: '600' },
 
   lista: { flex: 1, paddingHorizontal: 12 },
   fila: { flexDirection: 'row', alignItems: 'center', gap: 12, backgroundColor: colors.card, borderRadius: 10, padding: 12, marginBottom: 8, borderWidth: 1, borderColor: colors.border },
   filaExistente: { opacity: 0.6 },
   nombre: { color: colors.text, fontWeight: '600', fontSize: 14 },
-  meta: { color: colors.textMuted, fontSize: 11, marginTop: 2 },
+  meta: { color: colors.textMuted, fontSize: 13, marginTop: 2 },
 
   precioCaja: { flexDirection: 'row', alignItems: 'center', gap: 2, borderWidth: 1, borderColor: colors.border, borderRadius: 8, paddingHorizontal: 8, backgroundColor: colors.input },
-  moneda: { color: colors.textMuted, fontSize: 12 },
+  moneda: { color: colors.textMuted, fontSize: 13 },
   precioInput: { width: 46, paddingVertical: 8, color: colors.text, fontSize: 14, fontWeight: '600' },
 
   pie: { flexDirection: 'row', gap: 10, padding: 16, backgroundColor: colors.card, borderTopWidth: 1, borderTopColor: colors.border },

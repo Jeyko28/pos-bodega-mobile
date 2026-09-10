@@ -8,6 +8,9 @@ import { CATEGORIAS_BASE, iconoCategoria } from '../data/categorias'
 import { coincide, esElMismo } from '../utils/texto'
 import { usePieDeHoja } from '../utils/teclado'
 import BarcodeScannerModal from '../components/BarcodeScannerModal'
+import AvisoLicencia from '../components/AvisoLicencia'
+import LicenciaScreen from './LicenciaScreen'
+import { useLetra } from '../context/LetraContext'
 import { chips } from '../theme/chips'
 import * as Haptics from 'expo-haptics'
 
@@ -43,6 +46,8 @@ function nuevoCarrito(carritosActuales = []) {
 
 export default function POSScreen() {
   const { usuario } = useSesion()
+  const { tx } = useLetra()
+  const styles = crearStyles(tx)
   const { alturaTeclado, espacioAbajo } = usePieDeHoja()
   const [productos, setProductos] = useState([])
   const [busqueda, setBusqueda] = useState('')
@@ -71,6 +76,8 @@ export default function POSScreen() {
   const [creandoProducto, setCreandoProducto] = useState(false)
   const [modalSuelto, setModalSuelto] = useState(false)
   const [montoSuelto, setMontoSuelto] = useState('')
+  const [licencia, setLicencia] = useState(() => db.getEstadoLicencia())
+  const [modalLicencia, setModalLicencia] = useState(false)
 
   const [aviso, setAviso] = useState(null)
   const avisoOpacidad = useRef(new Animated.Value(0)).current
@@ -96,6 +103,7 @@ export default function POSScreen() {
   async function cargar() {
     setProductos(db.getProductos())
     setClientes(db.getClientes())
+    setLicencia(db.getEstadoLicencia())
     setCategoriasCustom(db.getCategoriasCustom())
     const top = db.getMasVendidos()
     setMasVendidos(top)
@@ -152,7 +160,7 @@ export default function POSScreen() {
     if (!(monto > 0)) return
     actualizarCarritoActivo([...carritoActivo.items, {
       id: `suelto-${Date.now()}`,
-      nombre: 'Varios',
+      nombre: 'Suelto',
       precio: monto,
       cantidad: 1,
       subtotal: monto,
@@ -170,10 +178,15 @@ export default function POSScreen() {
     // producto y no la pantalla.
     if (!p) {
       // Un código desconocido no es un error: es la forma normal de completar el
-      // catálogo. Se cierra la cámara y se ofrece engancharlo a un producto que
-      // ya existe (típico de los que entraron sin código desde el catálogo base).
+      // catálogo. Pero primero se descarta que sea el del paquete grande: ese
+      // se escanea al ingresar, no al vender.
+      const pb = productos.find(x => x.bulto_codigo && String(x.bulto_codigo).trim() === buscado)
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning)
       setScanner(false)
+      if (pb) {
+        Alert.alert('Es el paquete grande', `Ese código es del paquete de "${pb.nombre}". Para vender, escanea una unidad, no el paquete.`)
+        return
+      }
       setTimeout(() => setCodigoHuerfano(buscado), 350)
       return
     }
@@ -419,7 +432,7 @@ export default function POSScreen() {
         : `✓ Venta registrada — ${fmt(resultado.total)}`)
     } catch (e) {
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error)
-      Alert.alert('Error', 'No se pudo registrar la venta.')
+      Alert.alert('No se pudo cobrar', e?.message || 'No se pudo registrar la venta.')
     }
     setCobrando(false)
   }
@@ -435,6 +448,7 @@ export default function POSScreen() {
 
   return (
     <View style={styles.root}>
+      <AvisoLicencia estado={licencia} onVerCodigo={() => setModalLicencia(true)} />
       {/* Selector de carritos / ventas en espera */}
       <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.tabsCarritos} contentContainerStyle={{ gap: 8, paddingHorizontal: 12 }}>
         {carritos.map(c => (
@@ -601,7 +615,7 @@ export default function POSScreen() {
                 .map(p => (
                   <TouchableOpacity key={p.id} style={styles.filaHuerfano} onPress={() => engancharCodigo(p)}>
                     <Text style={styles.iconoProducto}>{iconoCategoria(p.categoria, categoriasCustom)}</Text>
-                    <Text style={{ flex: 1, color: colors.text, fontSize: 14, fontWeight: '600' }}>{p.nombre}</Text>
+                    <Text style={{ flex: 1, color: colors.text, fontSize: tx(14), fontWeight: '600' }}>{p.nombre}</Text>
                     <Text style={styles.precioProducto}>{fmt(p.precio)}</Text>
                   </TouchableOpacity>
                 ))}
@@ -763,8 +777,8 @@ export default function POSScreen() {
         <View style={[styles.modalFondo, { paddingBottom: alturaTeclado }]}>
           <Pressable style={StyleSheet.absoluteFill} onPress={() => setModalSuelto(false)} />
           <ScrollView style={styles.modalScrollLimite} contentContainerStyle={[styles.modalCaja, { paddingBottom: 20 + espacioAbajo }]} keyboardShouldPersistTaps="handled">
-            <Text style={styles.modalTitulo}>S/ Cobrar un monto suelto</Text>
-            <Text style={styles.textoMuted}>Para lo que no está en el catálogo: pan, hielo, una bolsa. Entra al carrito como "Varios" y no toca el stock de nada.</Text>
+            <Text style={styles.modalTitulo}>S/ Cobrar algo suelto</Text>
+            <Text style={styles.textoMuted}>Para lo que no está en el catálogo: pan, hielo, una bolsa. Entra al carrito como "Suelto" y no toca el stock de nada.</Text>
 
             <TextInput
               style={[styles.input, styles.inputPeso]}
@@ -850,95 +864,107 @@ export default function POSScreen() {
           </ScrollView>
         </View>
       </Modal>
+
+      <Modal visible={modalLicencia} animationType="slide" onRequestClose={() => setModalLicencia(false)}>
+        <View style={{ flex: 1, backgroundColor: colors.bg, paddingTop: 48 }}>
+          <TouchableOpacity onPress={() => setModalLicencia(false)}
+            style={{ alignSelf: 'flex-end', marginRight: 16, marginBottom: 4, paddingHorizontal: 14, paddingVertical: 10 }}>
+            <Text style={{ color: colors.textMuted, fontWeight: '700', fontSize: tx(15) }}>✕ Cerrar</Text>
+          </TouchableOpacity>
+          <LicenciaScreen onActivada={() => { setModalLicencia(false); cargar() }} />
+        </View>
+      </Modal>
     </View>
   )
 }
 
-const styles = StyleSheet.create({
+// Los tamaños de letra pasan por tx() para el interruptor "Letra grande"
+// (Ajustes → Legibilidad). El cierre `})` sirve igual para el objeto plano.
+const crearStyles = (tx) => ({
   root: { flex: 1, backgroundColor: colors.bg },
   tabsCarritos: { flexGrow: 0, paddingVertical: 10, borderBottomWidth: 1, borderColor: colors.border },
   tabCarrito: { paddingHorizontal: 14, paddingVertical: 8, borderRadius: 999, backgroundColor: colors.card, borderWidth: 1, borderColor: colors.border },
   tabCarritoActivo: { backgroundColor: colors.accentBg, borderColor: colors.primary },
-  tabCarritoTexto: { color: colors.textMuted, fontWeight: '600', fontSize: 13 },
+  tabCarritoTexto: { color: colors.textMuted, fontWeight: '600', fontSize: tx(13) },
   tabCarritoTextoActivo: { color: colors.accent },
   tabNuevo: { paddingHorizontal: 14, paddingVertical: 8, borderRadius: 999, borderWidth: 1, borderColor: colors.borderStrong, borderStyle: 'dashed' },
-  tabNuevoTexto: { color: colors.textMuted, fontSize: 13, fontWeight: '600' },
+  tabNuevoTexto: { color: colors.textMuted, fontSize: tx(13), fontWeight: '600' },
   filaBuscador: { flexDirection: 'row', alignItems: 'center', gap: 8, margin: 12 },
   buscador: { flex: 1, backgroundColor: colors.input, borderWidth: 1, borderColor: colors.border, borderRadius: 10, padding: 12, color: colors.text },
   botonEscanear: { width: 48, height: 48, alignItems: 'center', justifyContent: 'center', borderRadius: 10, borderWidth: 1, borderColor: colors.borderStrong, backgroundColor: colors.card },
-  botonEscanearTexto: { fontSize: 22, lineHeight: 28 },
-  botonSueltoTexto: { fontSize: 18, lineHeight: 24, fontWeight: '800', color: colors.accent },
+  botonEscanearTexto: { fontSize: tx(22), lineHeight: 28 },
+  botonSueltoTexto: { fontSize: tx(18), lineHeight: 24, fontWeight: '800', color: colors.accent },
   listaProductos: { flex: 1, paddingHorizontal: 12 },
   filaProducto: { flexDirection: 'row', alignItems: 'center', backgroundColor: colors.card, borderRadius: 10, padding: 12, marginBottom: 8, borderWidth: 1, borderColor: colors.border },
-  iconoProducto: { fontSize: 20, lineHeight: 26, marginRight: 10 },
+  iconoProducto: { fontSize: tx(20), lineHeight: 26, marginRight: 10 },
   filaSinStock: { opacity: 0.5, borderStyle: 'dashed' },
   botonRapido: { flex: 1, minHeight: 96, backgroundColor: colors.card, borderRadius: 12, borderWidth: 1, borderColor: colors.border, padding: 12, marginBottom: 8, justifyContent: 'space-between' },
-  iconoRapido: { fontSize: 22, lineHeight: 28 },
-  sinStockRapido: { color: colors.danger, fontSize: 11, fontWeight: '700', marginTop: 2 },
-  nombreRapido: { color: colors.text, fontWeight: '700', fontSize: 14, marginTop: 4 },
-  precioRapido: { color: colors.accent, fontWeight: '800', fontSize: 17, marginTop: 4 },
+  iconoRapido: { fontSize: tx(22), lineHeight: 28 },
+  sinStockRapido: { color: colors.danger, fontSize: tx(13), fontWeight: '700', marginTop: 2 },
+  nombreRapido: { color: colors.text, fontWeight: '700', fontSize: tx(15), marginTop: 4 },
+  precioRapido: { color: colors.accent, fontWeight: '800', fontSize: tx(19), marginTop: 4 },
   nuevoProductoCaja: { marginTop: 10, paddingTop: 12, borderTopWidth: 1, borderTopColor: colors.border, gap: 8 },
-  nuevoProductoTitulo: { color: colors.textMuted, fontSize: 12, fontWeight: '700' },
+  nuevoProductoTitulo: { color: colors.textMuted, fontSize: tx(13), fontWeight: '700' },
   nuevoProductoFila: { flexDirection: 'row', gap: 8 },
   atajosPago: { flexDirection: 'row', gap: 8, marginBottom: 4 },
   atajoPago: { flex: 1, paddingVertical: 12, borderRadius: 10, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.input, alignItems: 'center' },
-  atajoPagoTexto: { color: colors.text, fontWeight: '700', fontSize: 15 },
+  atajoPagoTexto: { color: colors.text, fontWeight: '700', fontSize: tx(15) },
   atajoJusto: { backgroundColor: colors.accentBg, borderColor: colors.primary },
-  atajoJustoTexto: { color: colors.accent, fontWeight: '800', fontSize: 14 },
-  motivoBloqueo: { color: colors.warning, fontSize: 13, fontWeight: '600', textAlign: 'center', marginTop: 4 },
+  atajoJustoTexto: { color: colors.accent, fontWeight: '800', fontSize: tx(14) },
+  motivoBloqueo: { color: colors.warning, fontSize: tx(13), fontWeight: '600', textAlign: 'center', marginTop: 4 },
   crearCliente: { paddingVertical: 12, paddingHorizontal: 14, borderRadius: 10, borderWidth: 1, borderStyle: 'dashed', borderColor: colors.primary, backgroundColor: colors.accentBg, alignItems: 'center' },
-  crearClienteTexto: { color: colors.accent, fontWeight: '700', fontSize: 13 },
-  sinStockTexto: { color: colors.danger, fontSize: 12, marginTop: 2, fontWeight: '600' },
-  nombreProducto: { color: colors.text, fontWeight: '600', fontSize: 14 },
-  stockProducto: { color: colors.textMuted, fontSize: 12, marginTop: 2 },
-  precioProducto: { color: colors.accent, fontWeight: '700', fontSize: 15 },
-  vacio: { color: colors.textMuted, textAlign: 'center', padding: 16, fontSize: 13 },
+  crearClienteTexto: { color: colors.accent, fontWeight: '700', fontSize: tx(13) },
+  sinStockTexto: { color: colors.danger, fontSize: tx(13), marginTop: 2, fontWeight: '600' },
+  nombreProducto: { color: colors.text, fontWeight: '600', fontSize: tx(15) },
+  stockProducto: { color: colors.textMuted, fontSize: tx(13), marginTop: 2 },
+  precioProducto: { color: colors.accent, fontWeight: '700', fontSize: tx(17) },
+  vacio: { color: colors.textMuted, textAlign: 'center', padding: 16, fontSize: tx(13) },
   filaHuerfano: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: colors.border },
   panelCarrito: { borderTopWidth: 1, borderColor: colors.border, backgroundColor: colors.card, padding: 12 },
   filaCarrito: { flexDirection: 'row', alignItems: 'center', paddingVertical: 6, gap: 8 },
-  itemNombre: { color: colors.text, flex: 1, fontSize: 13 },
+  itemNombre: { color: colors.text, flex: 1, fontSize: tx(13) },
   controlesCantidad: { flexDirection: 'row', alignItems: 'center', gap: 8 },
-  botonCantidad: { width: 26, height: 26, borderRadius: 13, backgroundColor: colors.bg, borderWidth: 1, borderColor: colors.border, alignItems: 'center', justifyContent: 'center' },
-  botonCantidadTexto: { color: colors.text, fontWeight: '700' },
-  cantidadTexto: { color: colors.text, fontWeight: '700', minWidth: 20, textAlign: 'center' },
+  botonCantidad: { width: 32, height: 32, borderRadius: 16, backgroundColor: colors.bg, borderWidth: 1, borderColor: colors.border, alignItems: 'center', justifyContent: 'center' },
+  botonCantidadTexto: { color: colors.text, fontWeight: '700', fontSize: tx(16) },
+  cantidadTexto: { color: colors.text, fontWeight: '700', fontSize: tx(15), minWidth: 22, textAlign: 'center' },
   itemSubtotal: { color: colors.accent, fontWeight: '700', minWidth: 70, textAlign: 'right' },
   botonEditarPeso: { paddingHorizontal: 10, paddingVertical: 4, borderRadius: 8, backgroundColor: colors.accentBg, borderWidth: 1, borderColor: colors.primary },
-  botonEditarPesoTexto: { color: colors.accent, fontWeight: '600', fontSize: 12 },
+  botonEditarPesoTexto: { color: colors.accent, fontWeight: '600', fontSize: tx(13) },
   filaTotal: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: 10, borderTopWidth: 1, borderColor: colors.border, marginTop: 4 },
-  totalLabel: { color: colors.textMuted, fontSize: 13 },
-  totalValor: { color: colors.text, fontWeight: '900', fontSize: 20 },
+  totalLabel: { color: colors.textMuted, fontSize: tx(13) },
+  totalValor: { color: colors.text, fontWeight: '900', fontSize: tx(24) },
   botonCobrar: { backgroundColor: colors.primary, borderRadius: 12, padding: 16, alignItems: 'center' },
   botonDeshabilitado: { opacity: 0.4 },
-  botonCobrarTexto: { color: colors.primaryText, fontWeight: '700', fontSize: 16 },
+  botonCobrarTexto: { color: colors.primaryText, fontWeight: '700', fontSize: tx(17) },
   modalFondo: { flex: 1, backgroundColor: colors.overlay, justifyContent: 'flex-end' },
   modalCaja: { backgroundColor: colors.card, borderTopLeftRadius: 20, borderTopRightRadius: 20, padding: 20, gap: 12 },
   modalScrollLimite: { flexGrow: 0, maxHeight: '85%' },
-  modalTitulo: { color: colors.text, fontWeight: '700', fontSize: 16, marginBottom: 4 },
+  modalTitulo: { color: colors.text, fontWeight: '700', fontSize: tx(16), marginBottom: 4 },
   aviso: { position: 'absolute', top: 12, left: 16, right: 16, backgroundColor: colors.primary, borderRadius: 12, paddingVertical: 12, paddingHorizontal: 16, alignItems: 'center', elevation: 4, shadowColor: '#000', shadowOpacity: 0.15, shadowRadius: 8, shadowOffset: { width: 0, height: 2 } },
-  avisoTexto: { color: colors.primaryText, fontWeight: '700', fontSize: 15 },
+  avisoTexto: { color: colors.primaryText, fontWeight: '700', fontSize: tx(15) },
   modoGranelFila: { flexDirection: 'row', gap: 8 },
   modoGranelBoton: { flex: 1, paddingVertical: 10, borderRadius: 10, borderWidth: 1, borderColor: colors.border, alignItems: 'center' },
   modoGranelBotonActivo: { backgroundColor: colors.accentBg, borderColor: colors.primary },
-  modoGranelTexto: { color: colors.textMuted, fontWeight: '600', fontSize: 13 },
+  modoGranelTexto: { color: colors.textMuted, fontWeight: '600', fontSize: tx(13) },
   modoGranelTextoActivo: { color: colors.accent },
   metodosGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
   metodoBoton: { paddingHorizontal: 14, paddingVertical: 10, borderRadius: 10, borderWidth: 1, borderColor: colors.border },
   metodoBotonActivo: { backgroundColor: colors.accentBg, borderColor: colors.primary },
   metodoTexto: { color: colors.textMuted, fontWeight: '600' },
   metodoTextoActivo: { color: colors.accent },
-  input: { backgroundColor: colors.input, borderWidth: 1, borderColor: colors.border, borderRadius: 10, padding: 12, color: colors.text, fontSize: 15 },
-  vueltoTexto: { color: colors.accent, fontWeight: '700', fontSize: 15, marginTop: 8 },
-  vueltoFalta: { color: colors.warning, fontWeight: '700', fontSize: 15, marginTop: 8 },
-  textoMuted: { color: colors.textMuted, fontSize: 13 },
-  inputPeso: { fontSize: 22, fontWeight: '700', textAlign: 'center', marginTop: 10 },
+  input: { backgroundColor: colors.input, borderWidth: 1, borderColor: colors.border, borderRadius: 10, padding: 12, color: colors.text, fontSize: tx(15) },
+  vueltoTexto: { color: colors.accent, fontWeight: '800', fontSize: tx(20), marginTop: 8 },
+  vueltoFalta: { color: colors.warning, fontWeight: '800', fontSize: tx(20), marginTop: 8 },
+  textoMuted: { color: colors.textMuted, fontSize: tx(13) },
+  inputPeso: { fontSize: tx(22), fontWeight: '700', textAlign: 'center', marginTop: 10 },
   pesosRapidosFila: { flexDirection: 'row', gap: 8, marginTop: 4 },
   botonPesoRapido: { flex: 1, paddingVertical: 10, borderRadius: 10, borderWidth: 1, borderColor: colors.border, alignItems: 'center' },
-  botonPesoRapidoTexto: { color: colors.text, fontWeight: '600', fontSize: 13 },
-  subtotalPreview: { color: colors.accent, fontWeight: '700', fontSize: 16, textAlign: 'center', marginTop: 4 },
+  botonPesoRapidoTexto: { color: colors.text, fontWeight: '600', fontSize: tx(13) },
+  subtotalPreview: { color: colors.accent, fontWeight: '700', fontSize: tx(16), textAlign: 'center', marginTop: 4 },
   clienteFila: { padding: 10, borderRadius: 8, marginBottom: 4, backgroundColor: colors.bg, borderWidth: 1, borderColor: colors.border },
   clienteFilaActiva: { backgroundColor: colors.accentBg, borderColor: colors.primary },
   clienteNombre: { color: colors.text, fontWeight: '600' },
-  clienteDeuda: { color: colors.warning, fontSize: 12 },
+  clienteDeuda: { color: colors.warning, fontSize: tx(13) },
   filaBotones: { flexDirection: 'row', gap: 10, marginTop: 8 },
   botonGhost: { flex: 1, padding: 14, borderRadius: 10, borderWidth: 1, borderColor: colors.border, alignItems: 'center' },
   botonGhostTexto: { color: colors.textMuted, fontWeight: '600' },

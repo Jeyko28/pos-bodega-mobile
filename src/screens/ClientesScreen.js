@@ -7,6 +7,7 @@ import { armarMensajeCobranza, abrirWhatsApp } from '../utils/cobranza'
 import { usePieDeHoja } from '../utils/teclado'
 import { coincide } from '../utils/texto'
 import { useSesion } from '../context/SesionContext'
+import { useLetra } from '../context/LetraContext'
 
 const fmt = (n) => `S/ ${Number(n).toFixed(2)}`
 const METODOS = ['Efectivo', 'Yape', 'Plin']
@@ -16,6 +17,8 @@ const BILLETES = [2, 5, 10, 20, 50, 100, 200]
 
 export default function ClientesScreen() {
   const { usuario } = useSesion()
+  const { tx } = useLetra()
+  const styles = crearStyles(tx)
   const { alturaTeclado, espacioAbajo } = usePieDeHoja()
   const [clientes, setClientes] = useState([])
   const [busqueda, setBusqueda] = useState('')
@@ -315,58 +318,59 @@ export default function ClientesScreen() {
   )
 }
 
-const styles = StyleSheet.create({
+// Los tamaños de letra pasan por tx() para el interruptor "Letra grande".
+const crearStyles = (tx) => ({
   root: { flex: 1, backgroundColor: colors.bg },
   header: { flexDirection: 'row', gap: 8, alignItems: 'center', padding: 12 },
   buscador: { flex: 1, backgroundColor: colors.input, borderWidth: 1, borderColor: colors.border, borderRadius: 10, padding: 12, color: colors.text },
   botonNuevo: { backgroundColor: colors.primary, borderRadius: 10, paddingHorizontal: 16, paddingVertical: 10 },
   botonNuevoTexto: { color: colors.primaryText, fontWeight: '700' },
   fila: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', backgroundColor: colors.card, borderRadius: 10, padding: 14, marginBottom: 8, borderWidth: 1, borderColor: colors.border },
-  nombre: { color: colors.text, fontWeight: '600', fontSize: 14 },
-  deuda: { color: colors.warning, fontWeight: '700', fontSize: 13 },
-  alDia: { color: colors.accent, fontSize: 13 },
-  vacio: { color: colors.textMuted, textAlign: 'center', padding: 24, fontSize: 13 },
+  nombre: { color: colors.text, fontWeight: '600', fontSize: tx(14) },
+  deuda: { color: colors.warning, fontWeight: '700', fontSize: tx(13) },
+  alDia: { color: colors.accent, fontSize: tx(13) },
+  vacio: { color: colors.textMuted, textAlign: 'center', padding: 24, fontSize: tx(13) },
   modalFondo: { flex: 1, backgroundColor: colors.overlay, justifyContent: 'flex-end' },
   modalCaja: { backgroundColor: colors.card, borderTopLeftRadius: 20, borderTopRightRadius: 20, padding: 20, gap: 10 },
   modalScrollLimite: { flexGrow: 0, maxHeight: '85%' },
-  modalTitulo: { color: colors.text, fontWeight: '700', fontSize: 16, marginBottom: 4 },
-  input: { backgroundColor: colors.input, borderWidth: 1, borderColor: colors.border, borderRadius: 10, padding: 12, color: colors.text, fontSize: 15 },
+  modalTitulo: { color: colors.text, fontWeight: '700', fontSize: tx(16), marginBottom: 4 },
+  input: { backgroundColor: colors.input, borderWidth: 1, borderColor: colors.border, borderRadius: 10, padding: 12, color: colors.text, fontSize: tx(15) },
   filaBotones: { flexDirection: 'row', gap: 10, marginTop: 8 },
   botonGhost: { flex: 1, padding: 14, borderRadius: 10, borderWidth: 1, borderColor: colors.border, alignItems: 'center' },
   botonGhostTexto: { color: colors.textMuted, fontWeight: '600' },
   botonPrimario: { flex: 1, padding: 14, borderRadius: 10, backgroundColor: colors.primary, alignItems: 'center' },
   botonPrimarioTexto: { color: colors.primaryText, fontWeight: '700' },
   botonGuardarTel: { paddingHorizontal: 16, justifyContent: 'center', borderRadius: 10, backgroundColor: colors.primary },
-  botonGuardarTelTexto: { color: colors.primaryText, fontWeight: '700', fontSize: 13 },
-  telefonoGuardado: { color: colors.accent, fontSize: 11, fontWeight: '600' },
-  etiquetaMensaje: { color: colors.textMuted, fontSize: 11, fontWeight: '700', textTransform: 'uppercase', letterSpacing: 0.5 },
+  botonGuardarTelTexto: { color: colors.primaryText, fontWeight: '700', fontSize: tx(13) },
+  telefonoGuardado: { color: colors.accent, fontSize: tx(13), fontWeight: '600' },
+  etiquetaMensaje: { color: colors.textMuted, fontSize: tx(13), fontWeight: '700', textTransform: 'uppercase', letterSpacing: 0.5 },
   mensajeInput: { minHeight: 92, textAlignVertical: 'top' },
   bloqueCobranza: { gap: 8, paddingBottom: 12, marginBottom: 4, borderBottomWidth: 1, borderBottomColor: colors.border },
   filaTelefono: { flexDirection: 'row', gap: 8 },
   botonWhatsApp: { paddingVertical: 14, borderRadius: 10, backgroundColor: '#25D366', alignItems: 'center' },
-  botonWhatsAppTexto: { color: '#0B2A1E', fontWeight: '800', fontSize: 14 },
+  botonWhatsAppTexto: { color: '#0B2A1E', fontWeight: '800', fontSize: tx(14) },
   botonDeshabilitado: { opacity: 0.45 },
   fiadoFila: { backgroundColor: colors.bg, borderRadius: 10, padding: 12, marginBottom: 8, borderWidth: 1, borderColor: colors.border },
-  fiadoConcepto: { color: colors.text, fontSize: 13 },
-  fiadoFecha: { color: colors.textMuted, fontSize: 11, marginTop: 2 },
+  fiadoConcepto: { color: colors.text, fontSize: tx(13) },
+  fiadoFecha: { color: colors.textMuted, fontSize: tx(13), marginTop: 2 },
   metodoChipsFila: { flexDirection: 'row', gap: 6 },
   fiadoPago: { flexDirection: 'row', gap: 6 },
   botonPagar: { backgroundColor: colors.primary, borderRadius: 10, paddingHorizontal: 20, justifyContent: 'center' },
   botonDeshabilitado: { opacity: 0.5 },
 
   bloqueAbono: { marginTop: 12, padding: 14, borderRadius: 12, backgroundColor: colors.accentBg, borderWidth: 1, borderColor: colors.primary, gap: 8 },
-  deudaLabel: { color: colors.textMuted, fontSize: 12, fontWeight: '600' },
-  deudaMonto: { color: colors.accent, fontWeight: '800', fontSize: 28 },
+  deudaLabel: { color: colors.textMuted, fontSize: tx(13), fontWeight: '600' },
+  deudaMonto: { color: colors.accent, fontWeight: '800', fontSize: tx(28) },
   metodoChip: { flex: 1, paddingVertical: 10, borderRadius: 10, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.card, alignItems: 'center' },
   metodoChipActivo: { borderColor: colors.primary, backgroundColor: colors.card },
-  metodoChipTexto: { color: colors.textMuted, fontWeight: '600', fontSize: 12 },
+  metodoChipTexto: { color: colors.textMuted, fontWeight: '600', fontSize: tx(13) },
   metodoChipTextoActivo: { color: colors.accent, fontWeight: '700' },
   billetesFila: { flexDirection: 'row', gap: 6, marginTop: 4 },
   billete: { flex: 1, paddingVertical: 8, borderRadius: 8, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.card, alignItems: 'center' },
-  billeteTexto: { color: colors.text, fontWeight: '700', fontSize: 13 },
-  vueltoOk: { color: colors.accent, fontWeight: '800', fontSize: 15, marginTop: 6 },
-  vueltoFalta: { color: colors.danger, fontWeight: '800', fontSize: 15, marginTop: 6 },
-  pagarTodo: { color: colors.accent, fontWeight: '700', fontSize: 13, textAlign: 'center', paddingVertical: 4 },
-  subtituloHistorial: { color: colors.textMuted, fontSize: 11, fontWeight: '700', textTransform: 'uppercase', letterSpacing: 0.5, marginTop: 16, marginBottom: 4 },
-  botonPagarTexto: { color: colors.primaryText, fontWeight: '700', fontSize: 12 },
+  billeteTexto: { color: colors.text, fontWeight: '700', fontSize: tx(13) },
+  vueltoOk: { color: colors.accent, fontWeight: '800', fontSize: tx(15), marginTop: 6 },
+  vueltoFalta: { color: colors.danger, fontWeight: '800', fontSize: tx(15), marginTop: 6 },
+  pagarTodo: { color: colors.accent, fontWeight: '700', fontSize: tx(13), textAlign: 'center', paddingVertical: 4 },
+  subtituloHistorial: { color: colors.textMuted, fontSize: tx(13), fontWeight: '700', textTransform: 'uppercase', letterSpacing: 0.5, marginTop: 16, marginBottom: 4 },
+  botonPagarTexto: { color: colors.primaryText, fontWeight: '700', fontSize: tx(13) },
 })

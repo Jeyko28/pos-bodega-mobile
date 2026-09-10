@@ -1,5 +1,5 @@
 import React, { useState, useCallback, useEffect } from 'react'
-import { View, Text, TextInput, TouchableOpacity, StyleSheet, Alert } from 'react-native'
+import { View, Text, TextInput, TouchableOpacity, StyleSheet, Alert, Modal } from 'react-native'
 import { KeyboardAwareScrollView } from 'react-native-keyboard-aware-scroll-view'
 import { useFocusEffect } from '@react-navigation/native'
 import { File, Paths } from 'expo-file-system'
@@ -9,9 +9,14 @@ import db from '../data/db'
 import { FRECUENCIAS, listarRespaldos, crearRespaldo } from '../data/respaldo'
 import { configDeRequest, DISCOVERY, intercambiarCodigoPorTokens, hayCuentaConectada, desconectarCuenta } from '../data/googleAuth'
 import { safDisponible, hayCarpetaElegida, elegirCarpetaPublica, olvidarCarpeta } from '../data/respaldoCarpeta'
+import LicenciaScreen from './LicenciaScreen'
+import { useLetra } from '../context/LetraContext'
+import { WS_VENTAS, mensajeSoporte } from '../data/licencia'
+import { abrirWhatsApp } from '../utils/cobranza'
 import { colors } from '../theme/colors'
 
 export default function ConfiguracionScreen() {
+  const { grande, alternar } = useLetra()
   const [config, setConfig] = useState(null)
   const [guardando, setGuardando] = useState(false)
   const [exito, setExito] = useState(false)
@@ -20,6 +25,8 @@ export default function ConfiguracionScreen() {
   const [respaldos, setRespaldos] = useState([])
   const [driveConectado, setDriveConectado] = useState(false)
   const [conectandoDrive, setConectandoDrive] = useState(false)
+  const [licencia, setLicencia] = useState(null)
+  const [modalLicencia, setModalLicencia] = useState(false)
   const [request, response, promptAsync] = AuthSession.useAuthRequest(configDeRequest(), DISCOVERY)
 
   async function exportarBackup() {
@@ -45,6 +52,7 @@ export default function ConfiguracionScreen() {
   useFocusEffect(useCallback(() => {
     setConfig(db.getConfig())
     setRespaldos(listarRespaldos())
+    setLicencia(db.getEstadoLicencia())
     hayCuentaConectada().then(setDriveConectado)
   }, []))
 
@@ -143,6 +151,10 @@ export default function ConfiguracionScreen() {
       return
     }
     await Sharing.shareAsync(uri, { mimeType: 'application/json', dialogTitle: 'Enviar respaldo de POS Bodega' })
+  }
+
+  async function hablarConSoporte() {
+    await abrirWhatsApp({ telefono: WS_VENTAS, mensaje: mensajeSoporte({ negocio: config?.negocio_nombre }) })
   }
 
   async function guardar() {
@@ -296,7 +308,56 @@ export default function ConfiguracionScreen() {
         </TouchableOpacity>
       </View>
 
+      <View style={styles.tarjeta}>
+        <Text style={styles.tituloSeccion}>🔑 Mi licencia</Text>
+        <Text style={styles.textoAyuda}>
+          {licencia?.modo === 'activa'
+            ? '✓ Licencia activa: tu pago único ya quedó registrado en este teléfono.'
+            : licencia?.modo === 'bloqueada'
+              ? '⏸️ Tus 30 días gratis terminaron. Activa tu pago único para seguir vendiendo.'
+              : `🎉 Estás en tus 30 días gratis (te quedan ${licencia?.restantes ?? '…'}).`}
+        </Text>
+        <TouchableOpacity style={styles.botonSecundario} onPress={() => setModalLicencia(true)}>
+          <Text style={styles.botonSecundarioTexto}>
+            {licencia?.modo === 'activa' ? 'Ver mi licencia' : 'Ver mi código / Activar'}
+          </Text>
+        </TouchableOpacity>
+      </View>
+
+      <View style={styles.tarjeta}>
+        <Text style={styles.tituloSeccion}>👁️ Legibilidad</Text>
+        <Text style={styles.textoAyuda}>
+          Letras más grandes en Vender, Productos, Ingreso, Clientes e Historial. Para vista cansada.
+        </Text>
+        <TouchableOpacity style={styles.destinoFila} onPress={alternar}>
+          <Text style={styles.destinoTexto}>🔍  Letra grande</Text>
+          <Text style={[styles.destinoEstado, grande && styles.destinoEstadoActivo]}>
+            {grande ? 'Activada' : 'Apagada'}
+          </Text>
+        </TouchableOpacity>
+      </View>
+
+      <View style={styles.tarjeta}>
+        <Text style={styles.tituloSeccion}>💬 Ayuda y soporte</Text>
+        <Text style={styles.textoAyuda}>
+          ¿Algo no cuadra o no sabes cómo hacer algo? Escríbenos por WhatsApp y te ayudamos.
+        </Text>
+        <TouchableOpacity style={styles.botonSecundario} onPress={hablarConSoporte}>
+          <Text style={styles.botonSecundarioTexto}>💬 Hablar con soporte</Text>
+        </TouchableOpacity>
+      </View>
+
       <Text style={styles.version}>POS Bodega · Fase 1 (celular)</Text>
+
+      <Modal visible={modalLicencia} animationType="slide" onRequestClose={() => setModalLicencia(false)}>
+        <View style={{ flex: 1, backgroundColor: colors.bg, paddingTop: 48 }}>
+          <TouchableOpacity onPress={() => setModalLicencia(false)}
+            style={{ alignSelf: 'flex-end', marginRight: 16, marginBottom: 4, paddingHorizontal: 14, paddingVertical: 10 }}>
+            <Text style={{ color: colors.textMuted, fontWeight: '700', fontSize: 15 }}>✕ Cerrar</Text>
+          </TouchableOpacity>
+          <LicenciaScreen onActivada={() => { setModalLicencia(false); setLicencia(db.getEstadoLicencia()) }} />
+        </View>
+      </Modal>
     </KeyboardAwareScrollView>
   )
 }
@@ -305,7 +366,7 @@ const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: colors.bg },
   tarjeta: { backgroundColor: colors.card, borderRadius: 12, borderWidth: 1, borderColor: colors.border, padding: 16, gap: 8 },
   tituloSeccion: { color: colors.text, fontWeight: '700', fontSize: 15, marginBottom: 4 },
-  etiqueta: { color: colors.textMuted, fontSize: 11, fontWeight: '700', textTransform: 'uppercase', letterSpacing: 0.5 },
+  etiqueta: { color: colors.textMuted, fontSize: 13, fontWeight: '700', textTransform: 'uppercase', letterSpacing: 0.5 },
   frecuenciaFila: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
   frecuenciaChip: { paddingHorizontal: 12, height: 34, justifyContent: 'center', borderRadius: 999, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.input },
   frecuenciaChipActivo: { backgroundColor: colors.accentBg, borderColor: colors.primary },
@@ -313,18 +374,18 @@ const styles = StyleSheet.create({
   frecuenciaTextoActivo: { color: colors.accent },
   destinoFila: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: 10, paddingHorizontal: 12, borderRadius: 10, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.bg },
   destinoTexto: { color: colors.text, fontSize: 14, fontWeight: '600' },
-  destinoEstado: { color: colors.textMuted, fontSize: 12 },
+  destinoEstado: { color: colors.textMuted, fontSize: 13 },
   destinoEstadoActivo: { color: colors.accent, fontWeight: '700' },
   destinoAccion: { color: colors.accent, fontSize: 13, fontWeight: '700' },
   respaldoFila: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: 10, paddingHorizontal: 12, borderRadius: 10, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.bg },
   respaldoFecha: { color: colors.text, fontSize: 13 },
   respaldoAccion: { color: colors.accent, fontSize: 13, fontWeight: '700' },
-  textoAdvertencia: { color: colors.warning, fontSize: 12, lineHeight: 17 },
+  textoAdvertencia: { color: colors.warning, fontSize: 13, lineHeight: 17 },
   input: { backgroundColor: colors.input, borderWidth: 1, borderColor: colors.border, borderRadius: 10, padding: 12, color: colors.text, fontSize: 15 },
   botonGuardar: { backgroundColor: colors.primary, borderRadius: 12, padding: 16, alignItems: 'center' },
   botonGuardarTexto: { color: colors.primaryText, fontWeight: '700', fontSize: 16 },
   textoAyuda: { color: colors.textMuted, fontSize: 13, lineHeight: 18 },
   botonSecundario: { backgroundColor: colors.accentBg, borderWidth: 1, borderColor: colors.primary, borderRadius: 10, padding: 14, alignItems: 'center', marginTop: 4 },
   botonSecundarioTexto: { color: colors.accent, fontWeight: '700', fontSize: 14 },
-  version: { color: colors.textMuted, fontSize: 11, textAlign: 'center', marginTop: 8 },
+  version: { color: colors.textMuted, fontSize: 13, textAlign: 'center', marginTop: 8 },
 })

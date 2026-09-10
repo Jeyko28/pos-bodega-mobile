@@ -8,16 +8,20 @@ import AsyncStorage from '@react-native-async-storage/async-storage'
 import db from './src/data/db'
 import { respaldarSiToca } from './src/data/respaldo'
 import { SesionContext } from './src/context/SesionContext'
+import { LetraProvider } from './src/context/LetraContext'
 import SetupScreen from './src/screens/SetupScreen'
+import OnboardingScreen from './src/screens/OnboardingScreen'
 import LoginScreen from './src/screens/LoginScreen'
 import MainTabs from './src/navigation/MainTabs'
 import { colors } from './src/theme/colors'
 
 const SESION_KEY = 'pos-bodega-sesion'
+const ONBOARDING_KEY = 'pos-bodega-onboarding'
 
 export default function App() {
   const [cargando, setCargando] = useState(true)
   const [setupPendiente, setSetupPendiente] = useState(false)
+  const [onboardingPendiente, setOnboardingPendiente] = useState(false)
   const [usuario, setUsuario] = useState(null)
   const [errorInicio, setErrorInicio] = useState(null)
 
@@ -47,6 +51,14 @@ export default function App() {
     setSetupPendiente(false)
     setUsuario(usuarioData)
     await AsyncStorage.setItem(SESION_KEY, JSON.stringify(usuarioData))
+    // Mini tutorial una sola vez, justo después de crear la bodega.
+    const visto = await AsyncStorage.getItem(ONBOARDING_KEY)
+    if (!visto) setOnboardingPendiente(true)
+  }
+
+  async function handleOnboardingTerminado() {
+    await AsyncStorage.setItem(ONBOARDING_KEY, '1')
+    setOnboardingPendiente(false)
   }
 
   async function handleLogin(usuarioData) {
@@ -78,15 +90,18 @@ export default function App() {
   }
 
   if (setupPendiente) return <SetupScreen onCompleto={handleSetupCompleto} />
+  if (onboardingPendiente) return <OnboardingScreen onTerminar={handleOnboardingTerminado} />
   if (!usuario) return <LoginScreen onLogin={handleLogin} />
 
   return (
     <SafeAreaProvider>
       <SesionContext.Provider value={{ usuario, handleLogout }}>
-        <NavigationContainer>
-          <MainTabs />
-          <StatusBar style="dark" />
-        </NavigationContainer>
+        <LetraProvider>
+          <NavigationContainer>
+            <MainTabs />
+            <StatusBar style="dark" />
+          </NavigationContainer>
+        </LetraProvider>
       </SesionContext.Provider>
     </SafeAreaProvider>
   )
