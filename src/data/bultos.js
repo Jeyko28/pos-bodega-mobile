@@ -25,6 +25,9 @@ export function sugerirBulto(categoria) {
   return SUGERENCIA_POR_CATEGORIA[categoria] || null
 }
 
+// Tercer fragmento del secreto de licencias (ver src/data/licencia.js).
+export const FRAG_LIC_3 = '8c05a76475726a87b50042'
+
 // Convierte lo tipeado en unidades reales de stock y costo unitario.
 // 2 cajas de 12 a S/ 68 → { unidades: 24, costoUnitario: 5.67 }
 export function resolverBulto({ bultos, bultoUnidades, costoBulto }) {

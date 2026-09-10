@@ -2,14 +2,20 @@
 // La bodeguera te manda su "código de instalación" (8 letras) por WhatsApp
 // y tú le devuelves el "código de activación" (16 letras) por el mismo medio.
 //
-// Uso:  node tools/generar-codigo.js <ID_INSTALACION>
-// Ej:   node tools/generar-codigo.js K7M2P9QA
+// Uso:  node tools/generar-codigo.js <ID_INSTALACION> ["Nombre del negocio"]
+// Ej:   node tools/generar-codigo.js K7M2P9QA "Bodega El Buen Precio"
 //
-// El secreto DEBE ser idéntico al de src/data/licencia.js (SECRETO_LICENCIA_HEX).
-// Si lo cambias, compila un APK nuevo y todos los códigos viejos mueren.
+// El secreto DEBE ser idéntico al que arma src/data/licencia.js
+// (FRAG_LIC_1 + FRAG_LIC_2 + FRAG_LIC_3). Si lo cambias, compila un APK nuevo
+// y todos los códigos viejos mueren.
+// Cada emisión queda anotada en tools/registro-codigos.jsonl: es tu control
+// de a quién le vendiste y cuándo (un ID con dos negocios distintos = código
+// prestado dando vueltas).
 const crypto = require('crypto')
+const fs = require('fs')
+const path = require('path')
 
-const SECRETO_LICENCIA_HEX = '3233e3b9fe80259bf182770681e904a6ca969774c0f2a7e3064be47cf88663b2'
+const SECRETO_LICENCIA_HEX = 'b88a2ebec55667b87eb0b5266607c75acb05330ccf8c05a76475726a87b50042'
 const ALFABETO_BASE32 = '0123456789ABCDEFGHJKMNPQRSTVWXYZ'
 
 function codificarBase32(bytes) {
@@ -30,7 +36,7 @@ function codificarBase32(bytes) {
 
 const id = String(process.argv[2] || '').toUpperCase().replace(/O/g, '0').replace(/[IL]/g, '1')
 if (!/^[0-9A-Z]{8}$/.test(id)) {
-  console.error('Uso: node tools/generar-codigo.js <ID de 8 letras, ej: K7M2P9QA>')
+  console.error('Uso: node tools/generar-codigo.js <ID de 8 letras, ej: K7M2P9QA> ["Negocio"]')
   process.exit(1)
 }
 
@@ -38,4 +44,13 @@ const mac = crypto.createHmac('sha256', Buffer.from(SECRETO_LICENCIA_HEX, 'hex')
   .update(`pos-bodega:${id}`, 'utf8')
   .digest()
 const crudo = codificarBase32(mac.slice(0, 10))
-console.log(`${crudo.slice(0, 4)}-${crudo.slice(4, 8)}-${crudo.slice(8, 12)}-${crudo.slice(12, 16)}`)
+const codigo = `${crudo.slice(0, 4)}-${crudo.slice(4, 8)}-${crudo.slice(8, 12)}-${crudo.slice(12, 16)}`
+console.log(codigo)
+
+const registro = path.join(__dirname, 'registro-codigos.jsonl')
+fs.appendFileSync(registro, JSON.stringify({
+  fecha: new Date().toISOString(),
+  instalacion: id,
+  negocio: process.argv[3] || null,
+  codigo,
+}) + '\n')

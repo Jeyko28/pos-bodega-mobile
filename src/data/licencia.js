@@ -9,6 +9,8 @@
 // Sin servidor no hay verdad absoluta: esto frena al usuario honesto y al
 // curioso, no a quien desarme el APK (ver README "Licencia").
 import * as Crypto from 'expo-crypto'
+import { FRAG_LIC_2 } from '../utils/texto'
+import { FRAG_LIC_3 } from './bultos'
 
 export const DIAS_PRUEBA = 30
 // Últimos días de prueba en que el POS muestra el aviso ámbar.
@@ -16,10 +18,12 @@ export const AVISO_PRUEBA_DESDE = 7
 // WhatsApp del vendedor: solo se usa para armar el enlace wa.me,
 // el número nunca se muestra en pantalla.
 export const WS_VENTAS = '51981487284'
-// Secreto HMAC-SHA256 (32 bytes en hex). Vive acá para verificar offline y
-// en tools/generar-codigo.js para firmar. Si se regenera, hay que compilar
-// un APK nuevo y todos los códigos viejos dejan de servir.
-const SECRETO_LICENCIA_HEX = '3233e3b9fe80259bf182770681e904a6ca969774c0f2a7e3064be47cf88663b2'
+// Secreto HMAC-SHA256 (32 bytes en hex) fragmentado en 3 módulos para que no
+// esté completo en ningún solo archivo del bundle. Es fricción, no muro: sin
+// servidor no hay secreto imposible de extraer (ver README "Licencia").
+// Si se regenera, hay que compilar un APK nuevo y los códigos viejos mueren.
+const FRAG_LIC_1 = 'b88a2ebec55667b87eb0b'
+const SECRETO_LICENCIA_HEX = FRAG_LIC_1 + FRAG_LIC_2 + FRAG_LIC_3
 
 // Crockford Base32: sin I, L, O ni U para que no se confundan al dictar.
 // La entrada igual se normaliza (O→0, I/L→1) por si la bodeguera las tipea.

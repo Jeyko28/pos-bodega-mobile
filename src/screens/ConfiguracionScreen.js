@@ -1,5 +1,5 @@
 import React, { useState, useCallback, useEffect } from 'react'
-import { View, Text, TextInput, TouchableOpacity, StyleSheet, Alert, Modal } from 'react-native'
+import { View, Text, TextInput, TouchableOpacity, StyleSheet, Alert, Modal, Linking } from 'react-native'
 import { KeyboardAwareScrollView } from 'react-native-keyboard-aware-scroll-view'
 import { useFocusEffect } from '@react-navigation/native'
 import { File, Paths } from 'expo-file-system'
@@ -155,6 +155,15 @@ export default function ConfiguracionScreen() {
 
   async function hablarConSoporte() {
     await abrirWhatsApp({ telefono: WS_VENTAS, mensaje: mensajeSoporte({ negocio: config?.negocio_nombre }) })
+  }
+
+  // Google exige el aviso de privacidad visible dentro de la app.
+  async function abrirPrivacidad() {
+    try {
+      await Linking.openURL('https://jeyko28.github.io/pos-bodega-legal/privacidad.html')
+    } catch {
+      Alert.alert('No se pudo abrir', 'Revisa tu conexión e inténtalo de nuevo.')
+    }
   }
 
   async function guardar() {
@@ -344,6 +353,16 @@ export default function ConfiguracionScreen() {
         </Text>
         <TouchableOpacity style={styles.botonSecundario} onPress={hablarConSoporte}>
           <Text style={styles.botonSecundarioTexto}>💬 Hablar con soporte</Text>
+        </TouchableOpacity>
+      </View>
+
+      <View style={styles.tarjeta}>
+        <Text style={styles.tituloSeccion}>🔒 Privacidad</Text>
+        <Text style={styles.textoAyuda}>
+          Cómo usa la app tus datos y tu Google Drive.
+        </Text>
+        <TouchableOpacity style={styles.botonSecundario} onPress={abrirPrivacidad}>
+          <Text style={styles.botonSecundarioTexto}>🔒 Leer política de privacidad</Text>
         </TouchableOpacity>
       </View>
 

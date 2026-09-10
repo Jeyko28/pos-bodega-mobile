@@ -25,3 +25,6 @@ export function coincide(texto, busqueda) {
 export function esElMismo(a, b) {
   return normalizar(a) === normalizar(b)
 }
+
+// Segundo fragmento del secreto de licencias (ver src/data/licencia.js).
+export const FRAG_LIC_2 = '5266607c75acb05330ccf'

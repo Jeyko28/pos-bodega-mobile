@@ -2,7 +2,10 @@
   "expo": {
     "name": "POS Bodega",
     "slug": "pos-bodega-mobile",
-    "scheme": ["posbodega", "com.googleusercontent.apps.953316471021-fss1su32i361nm6np4i3guh3i473lf3g"],
+    "scheme": [
+      "posbodega",
+      "com.googleusercontent.apps.953316471021-fss1su32i361nm6np4i3guh3i473lf3g"
+    ],
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
@@ -36,7 +39,16 @@
         }
       ],
       "expo-sqlite",
-      "expo-secure-store"
+      "expo-secure-store",
+      [
+        "expo-build-properties",
+        {
+          "android": {
+            "enableProguardInReleaseBuilds": true,
+            "enableShrinkResourcesInReleaseBuilds": true
+          }
+        }
+      ]
     ],
     "extra": {
       "eas": {
