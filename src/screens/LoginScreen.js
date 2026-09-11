@@ -1,13 +1,27 @@
 import React, { useState, useEffect } from 'react'
 import { View, Text, TextInput, TouchableOpacity, StyleSheet, KeyboardAvoidingView, Platform, ActivityIndicator, Modal, ScrollView, Alert } from 'react-native'
 import AsyncStorage from '@react-native-async-storage/async-storage'
-import * as LocalAuthentication from 'expo-local-authentication'
 import db from '../data/db'
 import { WS_VENTAS } from '../data/licencia'
 import { abrirWhatsApp } from '../utils/cobranza'
 import { colors } from '../theme/colors'
 
 export const ULTIMO_USUARIO_KEY = 'pos-bodega-ultimo-usuario'
+
+// El módulo de huella solo existe en builds que lo incluyen. Se pide con
+// require perezoso dentro de try/catch: un import normal arriba tumba el
+// arranque entero en builds viejos (pantalla roja), en vez de solo ocultar
+// el botón.
+let moduloHuella = undefined
+function obtenerHuella() {
+  if (moduloHuella !== undefined) return moduloHuella
+  try {
+    moduloHuella = require('expo-local-authentication')
+  } catch {
+    moduloHuella = null
+  }
+  return moduloHuella
+}
 
 export default function LoginScreen({ onLogin }) {
   const [username, setUsername] = useState('')
@@ -29,10 +43,12 @@ export default function LoginScreen({ onLogin }) {
   useEffect(() => {
     (async () => {
       try {
+        const LA = obtenerHuella()
+        if (!LA) return
         const guardado = await AsyncStorage.getItem(ULTIMO_USUARIO_KEY)
         if (!guardado) return
-        const tiene = await LocalAuthentication.hasHardwareAsync()
-        const activa = tiene && await LocalAuthentication.isEnrolledAsync()
+        const tiene = await LA.hasHardwareAsync()
+        const activa = tiene && await LA.isEnrolledAsync()
         if (activa) {
           setRecordado(JSON.parse(guardado))
           setHuellaLista(true)
@@ -53,7 +69,9 @@ export default function LoginScreen({ onLogin }) {
 
   async function entrarConHuella() {
     try {
-      const r = await LocalAuthentication.authenticateAsync({
+      const LA = obtenerHuella()
+      if (!LA) return
+      const r = await LA.authenticateAsync({
         promptMessage: 'Pon tu dedo para entrar a POS Bodega',
         cancelLabel: 'Usar contraseña',
         disableDeviceFallback: false,
