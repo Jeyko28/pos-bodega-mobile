@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react'
 import { View, Text, TextInput, TouchableOpacity, FlatList, StyleSheet, Modal, ScrollView, ActivityIndicator, Alert, Pressable, Animated } from 'react-native'
 import { useFocusEffect } from '@react-navigation/native'
+import { Ionicons } from '@expo/vector-icons'
 import db from '../data/db'
 import { useSesion } from '../context/SesionContext'
 import { colors } from '../theme/colors'
@@ -8,6 +9,7 @@ import { CATEGORIAS_BASE, iconoCategoria } from '../data/categorias'
 import { coincide, esElMismo } from '../utils/texto'
 import { usePieDeHoja } from '../utils/teclado'
 import BarcodeScannerModal from '../components/BarcodeScannerModal'
+import BarraBusqueda from '../components/BarraBusqueda'
 import AvisoLicencia from '../components/AvisoLicencia'
 import LicenciaScreen from './LicenciaScreen'
 import { useLetra } from '../context/LetraContext'
@@ -78,6 +80,12 @@ export default function POSScreen() {
   const [montoSuelto, setMontoSuelto] = useState('')
   const [licencia, setLicencia] = useState(() => db.getEstadoLicencia())
   const [modalLicencia, setModalLicencia] = useState(false)
+  // Vuelto de la última venta en efectivo: queda fijo a la vista hasta el
+  // próximo cobro (o hasta borrarlo). El toast solo confirma y se va.
+  const [vueltoFijo, setVueltoFijo] = useState(null)
+  // Carrito plegado: en pantalla chica la lista tapa los productos.
+  // Solo quedan Total + Cobrar a la vista.
+  const [carritoPlegado, setCarritoPlegado] = useState(false)
 
   const [aviso, setAviso] = useState(null)
   const avisoOpacidad = useRef(new Animated.Value(0)).current
@@ -257,6 +265,20 @@ export default function POSScreen() {
     actualizarCarritoActivo(nuevos)
   }
 
+  // Quitar de un toque: corregir con − toquecito por toquecito y con cola
+  // no funciona. Borrar todo pide confirmación: un dedo grueso perdona menos.
+  function quitarDelCarrito(productoId) {
+    actualizarCarritoActivo(carritoActivo.items.filter(it => it.id !== productoId))
+  }
+
+  function borrarCarrito() {
+    if (!carritoActivo.items.length) return
+    Alert.alert('Borrar carrito', `¿Quitar todo lo de ${carritoActivo.nombre} (${carritoActivo.items.length})?`, [
+      { text: 'Cancelar', style: 'cancel' },
+      { text: 'Borrar todo', style: 'destructive', onPress: () => actualizarCarritoActivo([]) },
+    ])
+  }
+
   function abrirGranel(p) {
     const existente = carritoActivo.items.find(it => it.id === p.id)
     setProductoGranel(p)
@@ -389,6 +411,7 @@ export default function POSScreen() {
 
   function abrirPago() {
     if (!carritoActivo.items.length) return
+    setVueltoFijo(null)
     setMetodoPago(null)
     setMontoRecibido('')
     setClienteFiadoId(null)
@@ -430,6 +453,9 @@ export default function POSScreen() {
       mostrarAviso(resultado.metodoPago === 'Efectivo'
         ? `✓ ${fmt(resultado.total)} — Vuelto ${fmt(resultado.vuelto)}`
         : `✓ Venta registrada — ${fmt(resultado.total)}`)
+      if (resultado.metodoPago === 'Efectivo') {
+        setVueltoFijo({ total: resultado.total, vuelto: resultado.vuelto })
+      }
     } catch (e) {
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error)
       Alert.alert('No se pudo cobrar', e?.message || 'No se pudo registrar la venta.')
@@ -466,8 +492,7 @@ export default function POSScreen() {
       </ScrollView>
 
       <View style={styles.filaBuscador}>
-        <TextInput style={styles.buscador} placeholder="🔍 Buscar producto..." placeholderTextColor={colors.placeholder}
-          value={busqueda} onChangeText={setBusqueda} />
+        <BarraBusqueda valor={busqueda} onCambiar={setBusqueda} textoGuia="Buscar producto..." />
         <TouchableOpacity style={styles.botonEscanear} onPress={() => { setMensajeScanner(null); setScanner(true) }}>
           <Text style={styles.botonEscanearTexto}>📷</Text>
         </TouchableOpacity>
@@ -557,8 +582,22 @@ export default function POSScreen() {
       />
       )}
 
+      {/* Vuelto fijo de la última venta: no se borra solo. */}
+      {vueltoFijo && !modalPago && (
+        <View style={styles.vueltoFijoCaja}>
+          <View style={{ flex: 1 }}>
+            <Text style={styles.vueltoFijoEtiqueta}>Vuelto de {fmt(vueltoFijo.total)}</Text>
+            <Text style={styles.vueltoFijoValor}>{fmt(vueltoFijo.vuelto)}</Text>
+          </View>
+          <TouchableOpacity onPress={() => setVueltoFijo(null)} style={styles.botonQuitar}>
+            <Text style={styles.botonQuitarTexto}>✕</Text>
+          </TouchableOpacity>
+        </View>
+      )}
+
       {/* Carrito activo */}
       <View style={styles.panelCarrito}>
+        {!carritoPlegado && (
         <ScrollView style={{ maxHeight: 160 }}>
           {carritoActivo.items.length === 0 && <Text style={styles.vacio}>Carrito de {carritoActivo.nombre} vacío — toca un producto para agregarlo.</Text>}
           {carritoActivo.items.map(it => (
@@ -576,11 +615,23 @@ export default function POSScreen() {
                 </View>
               )}
               <Text style={styles.itemSubtotal}>{fmt(it.subtotal)}</Text>
+              <TouchableOpacity onPress={() => quitarDelCarrito(it.id)} style={styles.botonQuitar}>
+                <Text style={styles.botonQuitarTexto}>✕</Text>
+              </TouchableOpacity>
             </View>
           ))}
         </ScrollView>
+        )}
         <View style={styles.filaTotal}>
+          <TouchableOpacity onPress={() => setCarritoPlegado(!carritoPlegado)} style={styles.botonPlegar}>
+            <Ionicons name={carritoPlegado ? 'chevron-down' : 'chevron-up'} size={22} color={colors.textMuted} />
+          </TouchableOpacity>
           <Text style={styles.totalLabel}>Total ({carritoActivo.nombre})</Text>
+          {carritoActivo.items.length > 0 && (
+            <TouchableOpacity onPress={borrarCarrito}>
+              <Text style={styles.borrarTexto}>Borrar</Text>
+            </TouchableOpacity>
+          )}
           <Text style={styles.totalValor}>{fmt(total)}</Text>
         </View>
         <TouchableOpacity style={[styles.botonCobrar, !carritoActivo.items.length && styles.botonDeshabilitado]} disabled={!carritoActivo.items.length} onPress={abrirPago}>
@@ -902,7 +953,7 @@ const crearStyles = (tx) => ({
   iconoRapido: { fontSize: tx(22), lineHeight: 28 },
   sinStockRapido: { color: colors.danger, fontSize: tx(13), fontWeight: '700', marginTop: 2 },
   nombreRapido: { color: colors.text, fontWeight: '700', fontSize: tx(15), marginTop: 4 },
-  precioRapido: { color: colors.accent, fontWeight: '800', fontSize: tx(19), marginTop: 4 },
+  precioRapido: { color: colors.accent, fontWeight: '800', fontSize: tx(21), marginTop: 4 },
   nuevoProductoCaja: { marginTop: 10, paddingTop: 12, borderTopWidth: 1, borderTopColor: colors.border, gap: 8 },
   nuevoProductoTitulo: { color: colors.textMuted, fontSize: tx(13), fontWeight: '700' },
   nuevoProductoFila: { flexDirection: 'row', gap: 8 },
@@ -917,22 +968,30 @@ const crearStyles = (tx) => ({
   sinStockTexto: { color: colors.danger, fontSize: tx(13), marginTop: 2, fontWeight: '600' },
   nombreProducto: { color: colors.text, fontWeight: '600', fontSize: tx(15) },
   stockProducto: { color: colors.textMuted, fontSize: tx(13), marginTop: 2 },
-  precioProducto: { color: colors.accent, fontWeight: '700', fontSize: tx(17) },
+  precioProducto: { color: colors.accent, fontWeight: '700', fontSize: tx(18) },
   vacio: { color: colors.textMuted, textAlign: 'center', padding: 16, fontSize: tx(13) },
   filaHuerfano: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: colors.border },
   panelCarrito: { borderTopWidth: 1, borderColor: colors.border, backgroundColor: colors.card, padding: 12 },
   filaCarrito: { flexDirection: 'row', alignItems: 'center', paddingVertical: 6, gap: 8 },
   itemNombre: { color: colors.text, flex: 1, fontSize: tx(13) },
   controlesCantidad: { flexDirection: 'row', alignItems: 'center', gap: 8 },
-  botonCantidad: { width: 32, height: 32, borderRadius: 16, backgroundColor: colors.bg, borderWidth: 1, borderColor: colors.border, alignItems: 'center', justifyContent: 'center' },
-  botonCantidadTexto: { color: colors.text, fontWeight: '700', fontSize: tx(16) },
-  cantidadTexto: { color: colors.text, fontWeight: '700', fontSize: tx(15), minWidth: 22, textAlign: 'center' },
+  botonCantidad: { width: 40, height: 40, borderRadius: 20, backgroundColor: colors.bg, borderWidth: 1, borderColor: colors.border, alignItems: 'center', justifyContent: 'center' },
+  botonCantidadTexto: { color: colors.text, fontWeight: '700', fontSize: tx(18) },
+  cantidadTexto: { color: colors.text, fontWeight: '700', fontSize: tx(16), minWidth: 22, textAlign: 'center' },
   itemSubtotal: { color: colors.accent, fontWeight: '700', minWidth: 70, textAlign: 'right' },
-  botonEditarPeso: { paddingHorizontal: 10, paddingVertical: 4, borderRadius: 8, backgroundColor: colors.accentBg, borderWidth: 1, borderColor: colors.primary },
-  botonEditarPesoTexto: { color: colors.accent, fontWeight: '600', fontSize: tx(13) },
+  botonQuitar: { width: 36, height: 36, borderRadius: 18, alignItems: 'center', justifyContent: 'center' },
+  botonQuitarTexto: { color: colors.danger, fontWeight: '700', fontSize: tx(16) },
+  borrarTexto: { color: colors.danger, fontWeight: '600', fontSize: tx(13) },
+  botonPlegar: { width: 40, height: 40, borderRadius: 20, alignItems: 'center', justifyContent: 'center' },
+  botonPlegarTexto: { color: colors.textMuted, fontWeight: '700', fontSize: tx(16) },
+  vueltoFijoCaja: { flexDirection: 'row', alignItems: 'center', gap: 8, marginHorizontal: 12, marginBottom: 8, padding: 12, borderRadius: 12, backgroundColor: colors.accentBg, borderWidth: 1, borderColor: colors.primary },
+  vueltoFijoEtiqueta: { color: colors.textMuted, fontSize: tx(13), fontWeight: '600' },
+  vueltoFijoValor: { color: colors.accent, fontWeight: '900', fontSize: tx(26) },
+  botonEditarPeso: { paddingHorizontal: 14, paddingVertical: 10, borderRadius: 8, backgroundColor: colors.accentBg, borderWidth: 1, borderColor: colors.primary },
+  botonEditarPesoTexto: { color: colors.accent, fontWeight: '600', fontSize: tx(14) },
   filaTotal: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: 10, borderTopWidth: 1, borderColor: colors.border, marginTop: 4 },
   totalLabel: { color: colors.textMuted, fontSize: tx(13) },
-  totalValor: { color: colors.text, fontWeight: '900', fontSize: tx(24) },
+  totalValor: { color: colors.text, fontWeight: '900', fontSize: tx(28) },
   botonCobrar: { backgroundColor: colors.primary, borderRadius: 12, padding: 16, alignItems: 'center' },
   botonDeshabilitado: { opacity: 0.4 },
   botonCobrarTexto: { color: colors.primaryText, fontWeight: '700', fontSize: tx(17) },

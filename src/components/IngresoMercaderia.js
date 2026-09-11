@@ -445,6 +445,12 @@ export default function IngresoMercaderia({ onCerrar, onGuardado }) {
               const suma = enBulto ? (res ? res.unidades : 0) : (parseFloat(e.cantidad) || 0)
               return (
               <View key={e.id} style={styles.filaEntrada}>
+                {/* Al inicio y no al final: la X en círculo al borde derecho se
+                    leía como "cerrar la pantalla". Adelante se lee como quitar
+                    ESTA fila. */}
+                <TouchableOpacity onPress={() => quitar(e.id)} style={styles.quitar}>
+                  <Ionicons name="close-circle" size={24} color={colors.textMuted} />
+                </TouchableOpacity>
                 <View style={{ flex: 1 }}>
                   <Text style={styles.nombre}>{e.nombre}</Text>
                   <Text style={styles.meta}>
@@ -583,9 +589,6 @@ export default function IngresoMercaderia({ onCerrar, onGuardado }) {
                     onFocus={() => setUltimoAgregado(null)}
                   />
                 )}
-                <TouchableOpacity onPress={() => quitar(e.id)} style={styles.quitar}>
-                  <Ionicons name="close-circle" size={22} color={colors.textMuted} />
-                </TouchableOpacity>
               </View>
               )
             })}
@@ -676,7 +679,7 @@ const crearStyles = (tx) => ({
   cambiarBulto: { color: colors.accent, fontSize: tx(14), fontWeight: '700', padding: 10 },
   bultoCodigoFijo: { color: colors.textMuted, fontSize: tx(13), fontWeight: '600' },
   previewBulto: { color: colors.accent, fontSize: tx(13), fontWeight: '700', lineHeight: 18 },
-  quitar: { paddingLeft: 2 },
+  quitar: { paddingRight: 4, paddingVertical: 8 },
   vacio: { color: colors.textMuted, textAlign: 'center', padding: 24, fontSize: tx(13) },
 
   pie: { flexDirection: 'row', gap: 10, padding: 16, backgroundColor: colors.card, borderTopWidth: 1, borderTopColor: colors.border },

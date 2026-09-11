@@ -1,7 +1,8 @@
 import React, { useState, useCallback } from 'react'
-import { View, Text, TextInput, TouchableOpacity, FlatList, StyleSheet, Modal, ScrollView, Pressable, Alert } from 'react-native'
+import { View, Text, TextInput, TouchableOpacity, FlatList, StyleSheet, Modal, ScrollView, Pressable, Alert, Linking } from 'react-native'
 import { useFocusEffect } from '@react-navigation/native'
 import db from '../data/db'
+import BarraBusqueda from '../components/BarraBusqueda'
 import { colors } from '../theme/colors'
 import { armarMensajeCobranza, abrirWhatsApp } from '../utils/cobranza'
 import { usePieDeHoja } from '../utils/teclado'
@@ -60,6 +61,17 @@ export default function ClientesScreen() {
     const actualizados = db.getClientes()
     setClientes(actualizados)
     setClienteDetalle(actualizados.find(c => c.id === clienteDetalle.id))
+  }
+
+  // Tocar para llamar: el número también sirve para hablar, no solo WhatsApp.
+  async function llamarPorTelefono() {
+    const numero = telefonoEdit.replace(/\D/g, '')
+    if (!numero) return
+    try {
+      await Linking.openURL(`tel:${numero}`)
+    } catch {
+      Alert.alert('No se pudo llamar', 'Revisa que el número sea correcto.')
+    }
   }
 
   // Tocar fuera cierra el modal, y eso ocurría antes de que el campo perdiera
@@ -126,13 +138,7 @@ export default function ClientesScreen() {
   return (
     <View style={styles.root}>
       <View style={styles.header}>
-        <TextInput
-          style={styles.buscador}
-          placeholder="🔍 Buscar casero..."
-          placeholderTextColor={colors.placeholder}
-          value={busqueda}
-          onChangeText={setBusqueda}
-        />
+        <BarraBusqueda valor={busqueda} onCambiar={setBusqueda} textoGuia="Buscar casero..." />
         <TouchableOpacity style={styles.botonNuevo} onPress={() => setModalNuevo(true)}><Text style={styles.botonNuevoTexto}>+ Cliente</Text></TouchableOpacity>
       </View>
 
@@ -193,6 +199,12 @@ export default function ClientesScreen() {
               </View>
               {!telefonoCambiado && telefonoEdit.trim() !== '' && (
                 <Text style={styles.telefonoGuardado}>✓ Número guardado</Text>
+              )}
+
+              {telefonoEdit.trim() !== '' && (
+                <TouchableOpacity style={styles.botonLlamar} onPress={llamarPorTelefono}>
+                  <Text style={styles.botonLlamarTexto}>📞  Llamar al casero</Text>
+                </TouchableOpacity>
               )}
 
               {deudaTotal > 0 && borradorMensaje === null && (
@@ -343,6 +355,8 @@ const crearStyles = (tx) => ({
   botonGuardarTel: { paddingHorizontal: 16, justifyContent: 'center', borderRadius: 10, backgroundColor: colors.primary },
   botonGuardarTelTexto: { color: colors.primaryText, fontWeight: '700', fontSize: tx(13) },
   telefonoGuardado: { color: colors.accent, fontSize: tx(13), fontWeight: '600' },
+  botonLlamar: { borderWidth: 1, borderColor: colors.border, borderRadius: 10, padding: 14, alignItems: 'center', marginTop: 8, backgroundColor: colors.card },
+  botonLlamarTexto: { color: colors.accent, fontWeight: '700', fontSize: tx(14) },
   etiquetaMensaje: { color: colors.textMuted, fontSize: tx(13), fontWeight: '700', textTransform: 'uppercase', letterSpacing: 0.5 },
   mensajeInput: { minHeight: 92, textAlignVertical: 'top' },
   bloqueCobranza: { gap: 8, paddingBottom: 12, marginBottom: 4, borderBottomWidth: 1, borderBottomColor: colors.border },

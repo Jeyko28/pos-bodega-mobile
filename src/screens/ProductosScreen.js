@@ -4,6 +4,7 @@ import { useFocusEffect } from '@react-navigation/native'
 import db from '../data/db'
 import { colors } from '../theme/colors'
 import BarcodeScannerModal from '../components/BarcodeScannerModal'
+import BarraBusqueda from '../components/BarraBusqueda'
 import CatalogoBase from '../components/CatalogoBase'
 import IngresoMercaderia from '../components/IngresoMercaderia'
 import { sugerirEmoji } from '../utils/emoji'
@@ -135,7 +136,7 @@ export default function ProductosScreen() {
   return (
     <View style={styles.root}>
       <View style={styles.header}>
-        <TextInput style={styles.buscador} placeholder="🔍 Buscar..." placeholderTextColor={colors.placeholder} value={busqueda} onChangeText={setBusqueda} />
+        <BarraBusqueda valor={busqueda} onCambiar={setBusqueda} textoGuia="Buscar..." />
         <TouchableOpacity style={styles.botonNuevo} onPress={abrirNuevo}><Text style={styles.botonNuevoTexto}>+ Producto</Text></TouchableOpacity>
       </View>
 
