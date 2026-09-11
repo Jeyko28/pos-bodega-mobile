@@ -29,6 +29,6 @@ export default function BarraBusqueda({ valor, onCambiar, textoGuia }) {
 const styles = StyleSheet.create({
   caja: { flex: 1, flexDirection: 'row', alignItems: 'center', minHeight: 48, backgroundColor: colors.input, borderWidth: 1, borderColor: colors.border, borderRadius: 10, paddingHorizontal: 12, gap: 8 },
   input: { flex: 1, color: colors.text, fontSize: 15, paddingVertical: 10 },
-  limpiar: { padding: 10 },
+  limpiar: { padding: 10, minWidth: 44, alignItems: 'center' },
   limpiarTexto: { color: colors.textMuted, fontWeight: '700', fontSize: 18 },
 })

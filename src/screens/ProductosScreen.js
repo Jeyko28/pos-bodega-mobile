@@ -173,7 +173,7 @@ export default function ProductosScreen() {
       <FlatList
         data={filtrados}
         keyExtractor={p => String(p.id)}
-        contentContainerStyle={{ padding: 12 }}
+        contentContainerStyle={{ paddingHorizontal: 12, paddingTop: 4, paddingBottom: 12 }}
         renderItem={({ item }) => (
           <TouchableOpacity style={styles.fila} onPress={() => abrirEditar(item)} onLongPress={() => eliminar(item)}>
             <View style={{ flex: 1 }}>
@@ -340,7 +340,7 @@ const crearStyles = (tx) => ({
   root: { flex: 1, backgroundColor: colors.bg },
   header: { flexDirection: 'row', gap: 8, padding: 12 },
   buscador: { flex: 1, backgroundColor: colors.input, borderWidth: 1, borderColor: colors.border, borderRadius: 10, padding: 12, color: colors.text },
-  botonIngreso: { marginHorizontal: 12, marginBottom: 4, paddingVertical: 12, paddingHorizontal: 14, borderRadius: 10, borderWidth: 1, borderColor: colors.borderStrong, backgroundColor: colors.card, alignItems: 'center' },
+  botonIngreso: { marginHorizontal: 12, marginBottom: 12, paddingVertical: 12, paddingHorizontal: 14, borderRadius: 10, borderWidth: 1, borderColor: colors.borderStrong, backgroundColor: colors.card, alignItems: 'center' },
   botonIngresoTexto: { color: colors.text, fontWeight: '700', fontSize: tx(14) },
   botonIngresoAyuda: { color: colors.textMuted, fontSize: tx(13), marginTop: 2 },
   botonNuevo: { backgroundColor: colors.primary, borderRadius: 10, paddingHorizontal: 16, justifyContent: 'center' },

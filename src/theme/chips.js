@@ -9,17 +9,17 @@ import { colors } from './colors'
 // recorta las etiquetas.
 export const chips = StyleSheet.create({
   fila: { paddingBottom: 10 },
-  scroll: { flexGrow: 0, height: 36 },
+  scroll: { flexGrow: 0, height: 44 },
   contenido: { flexDirection: 'row', paddingHorizontal: 12 },
   chip: {
     flexDirection: 'row', alignItems: 'center', justifyContent: 'center',
-    height: 36, paddingHorizontal: 14, marginRight: 8,
+    height: 44, paddingHorizontal: 14, marginRight: 8,
     borderRadius: 999, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.input,
   },
   chipActivo: { backgroundColor: colors.accentBg, borderColor: colors.primary },
   chipNuevo: {
     flexDirection: 'row', alignItems: 'center', justifyContent: 'center',
-    height: 36, paddingHorizontal: 14, marginRight: 8,
+    height: 44, paddingHorizontal: 14, marginRight: 8,
     borderRadius: 999, borderWidth: 1, borderColor: colors.borderStrong, borderStyle: 'dashed',
   },
   icono: { fontSize: 14, lineHeight: 18, marginRight: 6 },

@@ -99,8 +99,8 @@ export function construirAvisos({ bajoStock = [], fiadosAntiguos = [] }) {
 }
 
 const styles = StyleSheet.create({
-  punto: { position: 'absolute', top: 0, right: 8, minWidth: 16, height: 16, paddingHorizontal: 3, borderRadius: 999, backgroundColor: colors.warning, alignItems: 'center', justifyContent: 'center' },
-  puntoTexto: { color: '#fff', fontSize: 11, fontWeight: '800', lineHeight: 13 },
+  punto: { position: 'absolute', top: 2, right: 10, minWidth: 15, height: 15, paddingHorizontal: 3, borderRadius: 999, backgroundColor: colors.warning, alignItems: 'center', justifyContent: 'center' },
+  puntoTexto: { color: '#fff', fontSize: 10, fontWeight: '800', lineHeight: 12 },
 
   fondo: { flex: 1, backgroundColor: colors.overlay, justifyContent: 'center', padding: 24 },
   tarjetaAvisos: { backgroundColor: colors.card, borderRadius: 16, padding: 20 },

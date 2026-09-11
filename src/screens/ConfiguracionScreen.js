@@ -387,7 +387,7 @@ const styles = StyleSheet.create({
   tituloSeccion: { color: colors.text, fontWeight: '700', fontSize: 15, marginBottom: 4 },
   etiqueta: { color: colors.textMuted, fontSize: 13, fontWeight: '700', textTransform: 'uppercase', letterSpacing: 0.5 },
   frecuenciaFila: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
-  frecuenciaChip: { paddingHorizontal: 12, height: 34, justifyContent: 'center', borderRadius: 999, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.input },
+  frecuenciaChip: { paddingHorizontal: 12, height: 44, justifyContent: 'center', borderRadius: 999, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.input },
   frecuenciaChipActivo: { backgroundColor: colors.accentBg, borderColor: colors.primary },
   frecuenciaTexto: { color: colors.textMuted, fontWeight: '600', fontSize: 13, lineHeight: 18 },
   frecuenciaTextoActivo: { color: colors.accent },

@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react'
 import { View, Text, ActivityIndicator, StyleSheet } from 'react-native'
 import { StatusBar } from 'expo-status-bar'
 import { NavigationContainer } from '@react-navigation/native'
+import { createNativeStackNavigator } from '@react-navigation/native-stack'
 import { SafeAreaProvider } from 'react-native-safe-area-context'
 import AsyncStorage from '@react-native-async-storage/async-storage'
 
@@ -13,10 +14,13 @@ import SetupScreen from './src/screens/SetupScreen'
 import OnboardingScreen from './src/screens/OnboardingScreen'
 import LoginScreen, { ULTIMO_USUARIO_KEY } from './src/screens/LoginScreen'
 import MainTabs from './src/navigation/MainTabs'
+import ConfiguracionScreen from './src/screens/ConfiguracionScreen'
 import { colors } from './src/theme/colors'
 
 const SESION_KEY = 'pos-bodega-sesion'
 const ONBOARDING_KEY = 'pos-bodega-onboarding'
+
+const Stack = createNativeStackNavigator()
 
 export default function App() {
   const [cargando, setCargando] = useState(true)
@@ -100,7 +104,19 @@ export default function App() {
       <SesionContext.Provider value={{ usuario, handleLogout }}>
         <LetraProvider>
           <NavigationContainer>
-            <MainTabs />
+            {/* Ajustes vive en el perfil del dueño, no en la barra: 4 fijas
+                para todos y el cajero ni la ve. */}
+            <Stack.Navigator
+              screenOptions={{
+                headerStyle: { backgroundColor: colors.card },
+                headerTintColor: colors.text,
+                headerShadowVisible: false,
+                headerTitleAlign: 'center',
+              }}
+            >
+              <Stack.Screen name="Pestanas" component={MainTabs} options={{ headerShown: false }} />
+              <Stack.Screen name="Ajustes" component={ConfiguracionScreen} />
+            </Stack.Navigator>
             <StatusBar style="dark" />
           </NavigationContainer>
         </LetraProvider>

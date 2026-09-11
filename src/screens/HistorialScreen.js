@@ -590,7 +590,7 @@ export default function HistorialScreen() {
 const crearStyles = (tx) => ({
   root: { flex: 1, backgroundColor: colors.bg },
   periodoFila: { flexDirection: 'row', gap: 8, paddingHorizontal: 16, paddingTop: 16, paddingBottom: 12 },
-  periodoChip: { flex: 1, paddingVertical: 10, paddingHorizontal: 14, borderRadius: 10, borderWidth: 1, borderColor: colors.border, alignItems: 'center' },
+  periodoChip: { flex: 1, minHeight: 44, justifyContent: 'center', paddingVertical: 10, paddingHorizontal: 14, borderRadius: 10, borderWidth: 1, borderColor: colors.border, alignItems: 'center' },
   periodoChipActivo: { backgroundColor: colors.accentBg, borderColor: colors.primary },
   periodoTexto: { color: colors.textMuted, fontWeight: '600', fontSize: tx(13) },
   periodoTextoActivo: { color: colors.accent },
@@ -637,7 +637,7 @@ const crearStyles = (tx) => ({
   cierreCajonLabel: { color: colors.textMuted, fontSize: tx(13), marginBottom: 4 },
   cierreCajonValor: { color: colors.accent, fontWeight: '800', fontSize: tx(26) },
   textoFiado: { color: colors.warning, fontWeight: '700' },
-  resumen: { flexDirection: 'row', gap: 10, padding: 16 },
+  resumen: { flexDirection: 'row', gap: 10, paddingHorizontal: 16, paddingTop: 4, paddingBottom: 12 },
   resumenBox: { flex: 1, backgroundColor: colors.card, borderRadius: 12, padding: 14, alignItems: 'center', borderWidth: 1, borderColor: colors.border },
   resumenValor: { color: colors.accent, fontWeight: '900', fontSize: tx(20) },
   tarjetaGanancia: { marginHorizontal: 16, marginBottom: 8, padding: 14, borderRadius: 12, backgroundColor: colors.card, borderWidth: 1, borderColor: colors.border },

@@ -39,7 +39,7 @@ export default function BotonHeader({ icono, activo = false, colorActivo = color
           <Animated.View style={{ transform: [{ scale: escalaIcono }] }}>
             <Ionicons
               name={activo ? icono : `${icono}-outline`}
-              size={23}
+              size={28}
               color={activo ? colorActivo : colors.text}
             />
           </Animated.View>
@@ -52,6 +52,6 @@ export default function BotonHeader({ icono, activo = false, colorActivo = color
 
 const styles = StyleSheet.create({
   zona: { paddingHorizontal: 12, paddingVertical: 4 },
-  contenedor: { width: 42, height: 32, alignItems: 'center', justifyContent: 'center' },
+  contenedor: { width: 48, height: 40, alignItems: 'center', justifyContent: 'center' },
   pastilla: { ...StyleSheet.absoluteFillObject, borderRadius: 999, backgroundColor: colors.accentBg },
 })

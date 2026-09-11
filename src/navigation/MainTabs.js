@@ -8,7 +8,6 @@ import LicenciaScreen from '../screens/LicenciaScreen'
 import ProductosScreen from '../screens/ProductosScreen'
 import ClientesScreen from '../screens/ClientesScreen'
 import HistorialScreen from '../screens/HistorialScreen'
-import ConfiguracionScreen from '../screens/ConfiguracionScreen'
 import db from '../data/db'
 import { BotonNotificaciones, construirAvisos } from '../components/HeaderAcciones'
 import PanelUsuario from '../components/PanelUsuario'
@@ -108,7 +107,6 @@ export default function MainTabs() {
       }} />
       <Tab.Screen name="Clientes" component={ClientesScreen} />
       <Tab.Screen name="Historial" component={HistorialScreen} />
-      <Tab.Screen name="Configuracion" component={ConfiguracionScreen} options={{ title: 'Ajustes' }} />
     </Tab.Navigator>
   )
 }

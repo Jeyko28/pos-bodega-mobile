@@ -4,6 +4,7 @@ import { Ionicons } from '@expo/vector-icons'
 import db from '../data/db'
 import BotonHeader from './BotonHeader'
 import { useSesion } from '../context/SesionContext'
+import { useNavigation } from '@react-navigation/native'
 import { usePieDeHoja } from '../utils/teclado'
 import { colors } from '../theme/colors'
 
@@ -14,6 +15,7 @@ const FORM_VACIO = { nombre: '', username: '', password: '', rol: 'cajero' }
 // dos sin responder.
 export default function PanelUsuario() {
   const { usuario, handleLogout } = useSesion()
+  const navigation = useNavigation()
   const { alturaTeclado, espacioAbajo } = usePieDeHoja()
   const [abierto, setAbierto] = useState(false)
   const [vista, setVista] = useState('menu')
@@ -117,6 +119,14 @@ export default function PanelUsuario() {
                   <TouchableOpacity style={styles.opcion} onPress={irAUsuarios}>
                     <Ionicons name="people-outline" size={20} color={colors.text} />
                     <Text style={styles.opcionTexto}>Usuarios de la bodega</Text>
+                    <Ionicons name="chevron-forward" size={18} color={colors.textMuted} />
+                  </TouchableOpacity>
+                )}
+
+                {esAdmin && (
+                  <TouchableOpacity style={styles.opcion} onPress={() => { cerrar(); navigation.navigate('Ajustes') }}>
+                    <Ionicons name="settings-outline" size={20} color={colors.text} />
+                    <Text style={styles.opcionTexto}>Ajustes del negocio</Text>
                     <Ionicons name="chevron-forward" size={18} color={colors.textMuted} />
                   </TouchableOpacity>
                 )}
