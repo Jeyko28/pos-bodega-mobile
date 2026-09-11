@@ -9,7 +9,7 @@ import BarcodeScannerModal from './BarcodeScannerModal'
 import { iconoCategoria } from '../data/categorias'
 import { coincide } from '../utils/texto'
 import { useLetra } from '../context/LetraContext'
-import { PRESETS_BULTO, sugerirBulto, resolverBulto } from '../data/bultos'
+import { PRESETS_BULTO, sugerirBulto, resolverBulto, sugerirPrecio } from '../data/bultos'
 import { colors } from '../theme/colors'
 import { useSesion } from '../context/SesionContext'
 
@@ -480,6 +480,12 @@ export default function IngresoMercaderia({ onCerrar, onGuardado }) {
                         value={e.costo || ''}
                         onChangeText={v => cambiarCosto(e.id, v)}
                       />
+                      {(() => {
+                        const sug = sugerirPrecio(e.costo)
+                        return sug != null ? (
+                          <Text style={styles.previewBulto}>sug. para vender: S/ {sug}</Text>
+                        ) : null
+                      })()}
                     </>
                   )}
                   {enBulto && !e.bultoUnidades && (
@@ -566,12 +572,15 @@ export default function IngresoMercaderia({ onCerrar, onGuardado }) {
                       {res && (() => {
                         // Total para cotejar con la factura del mayorista: si
                         // pagó 80 por 2 cajas y puso 80 donde van 40, acá se ve.
+                        // Y sugerencia de venta con el margen, para no calcular.
                         const totalBultos = (parseFloat(e.bultos) || 0) * (parseFloat(e.costoBulto) || 0)
                         const totalTxt = totalBultos > 0 ? ` · total S/ ${totalBultos % 1 === 0 ? totalBultos : totalBultos.toFixed(2)}` : ''
+                        const sug = res.costoUnitario != null ? sugerirPrecio(res.costoUnitario) : null
+                        const sugTxt = sug != null ? ` · sug. S/ ${sug}` : ''
                         return (
                           <Text style={styles.previewBulto}>
                             {e.bultos || 0} {pluralBulto(e.bultoNombre, e.bultos)} × {e.bultoUnidades} = {res.unidades} {e.unidad}
-                            {res.costoUnitario != null ? ` · te cuesta S/ ${res.costoUnitario} c/u${totalTxt}` : ''}
+                            {res.costoUnitario != null ? ` · te cuesta S/ ${res.costoUnitario} c/u${totalTxt}${sugTxt}` : ''}
                           </Text>
                         )
                       })()}

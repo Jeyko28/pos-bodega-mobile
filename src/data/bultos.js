@@ -28,6 +28,16 @@ export function sugerirBulto(categoria) {
 // Tercer fragmento del secreto de licencias (ver src/data/licencia.js).
 export const FRAG_LIC_3 = '8c05a76475726a87b50042'
 
+// Margen por defecto para sugerir precio de venta desde el costo.
+// 30%: con sol y apuro nadie calcula; la sugerencia se acepta o se cambia.
+export const MARGEN_SUGERIDO = 0.30
+
+export function sugerirPrecio(costo) {
+  const c = parseFloat(costo)
+  if (!(c > 0)) return null
+  return Math.round(c * (1 + MARGEN_SUGERIDO) * 10) / 10
+}
+
 // Convierte lo tipeado en unidades reales de stock y costo unitario.
 // 2 cajas de 12 a S/ 68 → { unidades: 24, costoUnitario: 5.67 }
 export function resolverBulto({ bultos, bultoUnidades, costoBulto }) {
