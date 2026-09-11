@@ -11,7 +11,7 @@ import { SesionContext } from './src/context/SesionContext'
 import { LetraProvider } from './src/context/LetraContext'
 import SetupScreen from './src/screens/SetupScreen'
 import OnboardingScreen from './src/screens/OnboardingScreen'
-import LoginScreen from './src/screens/LoginScreen'
+import LoginScreen, { ULTIMO_USUARIO_KEY } from './src/screens/LoginScreen'
 import MainTabs from './src/navigation/MainTabs'
 import { colors } from './src/theme/colors'
 
@@ -51,6 +51,7 @@ export default function App() {
     setSetupPendiente(false)
     setUsuario(usuarioData)
     await AsyncStorage.setItem(SESION_KEY, JSON.stringify(usuarioData))
+    await AsyncStorage.setItem(ULTIMO_USUARIO_KEY, JSON.stringify(usuarioData))
     // Mini tutorial una sola vez, justo después de crear la bodega.
     const visto = await AsyncStorage.getItem(ONBOARDING_KEY)
     if (!visto) setOnboardingPendiente(true)
@@ -64,6 +65,7 @@ export default function App() {
   async function handleLogin(usuarioData) {
     setUsuario(usuarioData)
     await AsyncStorage.setItem(SESION_KEY, JSON.stringify(usuarioData))
+    await AsyncStorage.setItem(ULTIMO_USUARIO_KEY, JSON.stringify(usuarioData))
   }
 
   async function handleLogout() {

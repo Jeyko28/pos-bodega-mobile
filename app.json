@@ -48,6 +48,12 @@
             "enableShrinkResourcesInReleaseBuilds": true
           }
         }
+      ],
+      [
+        "expo-local-authentication",
+        {
+          "faceIDPermission": "POS Bodega usa tu huella o tu cara para entrar sin escribir tu contraseña."
+        }
       ]
     ],
     "extra": {

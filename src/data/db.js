@@ -2,7 +2,7 @@ import * as SQLite from 'expo-sqlite'
 import * as Crypto from 'expo-crypto'
 import AsyncStorage from '@react-native-async-storage/async-storage'
 import { normalizar as normalizarTexto } from '../utils/texto'
-import { DIAS_PRUEBA, AVISO_PRUEBA_DESDE, generarIdInstalacion, verificarCodigo } from './licencia'
+import { DIAS_PRUEBA, AVISO_PRUEBA_DESDE, generarIdInstalacion, verificarCodigo, verificarCodigoReset } from './licencia'
 
 // Antes todos los datos vivían en un solo JSON de AsyncStorage que se reescribía
 // entero en cada venta. Con miles de ventas eso se vuelve lento y arriesgado, así
@@ -412,6 +412,21 @@ async function cambiarPassword({ usuarioId, actual, nueva }) {
   }
   if (!nueva || nueva.length < 4) return { success: false, error: 'La nueva contraseña debe tener al menos 4 caracteres' }
   sql.runSync('UPDATE usuarios SET password = ? WHERE id = ?', await hashearPassword(nueva), usuarioId)
+  return { success: true }
+}
+
+// Recupero sin internet ni correo: el vendedor entrega por WhatsApp un código
+// atado a esta instalación (distinto al de activación). Con ese código se pone
+// clave nueva sin pedir la anterior.
+async function restablecerPassword({ username, codigo, nueva }) {
+  const u = sql.getFirstSync('SELECT id FROM usuarios WHERE username = ? AND activo = 1', String(username || '').trim())
+  if (!u) return { success: false, error: 'Ese usuario no existe en este teléfono' }
+  if (!nueva || nueva.length < 4) return { success: false, error: 'La nueva contraseña debe tener al menos 4 caracteres' }
+  const id = leerConfig('lic_instal_id', null)
+  if (!(await verificarCodigoReset(id, codigo))) {
+    return { success: false, error: 'Ese código no vale para este teléfono. Revísalo o pide tu código por WhatsApp.' }
+  }
+  sql.runSync('UPDATE usuarios SET password = ? WHERE id = ?', await hashearPassword(nueva), u.id)
   return { success: true }
 }
 
@@ -1274,7 +1289,7 @@ async function restaurarBackup(datos) {
 export default {
   initDB,
   isSetupCompletado, completarSetup,
-  login, getUsuarios, addUsuario, cambiarPassword, setUsuarioActivo,
+  login, getUsuarios, addUsuario, cambiarPassword, restablecerPassword, setUsuarioActivo,
   getProductos, addProducto, updateProducto, deleteProducto, getProductosBajoStock,
   addProductosLote, asignarCodigo, getMasVendidos,
   ingresarMercaderia, getIngresos, getDetalleIngreso, deshacerIngreso,

@@ -134,9 +134,28 @@ export async function verificarCodigo(idInstalacion, codigo) {
   const limpio = normalizarCodigo(codigo)
   if (limpio.length !== 16 || !idInstalacion) return false
   const esperado = normalizarCodigo(await generarCodigoPara(idInstalacion))
+  return compararLimpios(limpio, esperado)
+}
+
+function compararLimpios(a, b) {
+  if (a.length !== b.length) return false
   let dif = 0
-  for (let i = 0; i < 16; i++) dif |= limpio.charCodeAt(i) ^ esperado.charCodeAt(i)
+  for (let i = 0; i < a.length; i++) dif |= a.charCodeAt(i) ^ b.charCodeAt(i)
   return dif === 0
+}
+
+// Código de recupero de contraseña: mismo formato, otro mensaje firmado para
+// que un código de activación no sirva para resetear ni viceversa.
+export async function generarCodigoResetPara(idInstalacion) {
+  const mac = await hmacSha256(hexABbytes(SECRETO_LICENCIA_HEX), aBytesUtf8(`pos-bodega-reset:${String(idInstalacion).toUpperCase()}`))
+  return formatearCodigo(codificarBase32(mac.slice(0, 10)))
+}
+
+export async function verificarCodigoReset(idInstalacion, codigo) {
+  const limpio = normalizarCodigo(codigo)
+  if (limpio.length !== 16 || !idInstalacion) return false
+  const esperado = normalizarCodigo(await generarCodigoResetPara(idInstalacion))
+  return compararLimpios(limpio, esperado)
 }
 
 export function mensajePedirCodigo({ instalacionId, negocio }) {
