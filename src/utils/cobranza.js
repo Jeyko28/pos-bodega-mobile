@@ -37,6 +37,16 @@ export function armarMensajeCobranza({ cliente, deuda, negocio, yape }) {
 
 // El enlace wa.me funciona tenga o no la app instalada (cae a WhatsApp Web),
 // así que no hace falta detectar nada.
+// Para llamar se usa formato internacional (+51...): el marcador lo muestra
+// con sus adornos (paréntesis, guiones) pero el número va completo y vale
+// igual en roaming. Misma regla Perú que WhatsApp.
+export function aFormatoLlamada(telefono) {
+  const digitos = String(telefono || '').replace(/\D/g, '')
+  if (!digitos) return null
+  if (digitos.length === 9 && digitos.startsWith('9')) return `+51${digitos}`
+  if (digitos.length === 11 && digitos.startsWith('51')) return `+${digitos}`
+  return digitos.startsWith('+') ? digitos : `+${digitos}`
+}
 export async function abrirWhatsApp({ telefono, mensaje }) {
   const numero = aFormatoWhatsApp(telefono)
   if (!numero) {

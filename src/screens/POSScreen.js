@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react'
-import { View, Text, TextInput, TouchableOpacity, FlatList, StyleSheet, Modal, ScrollView, ActivityIndicator, Alert, Pressable, Animated } from 'react-native'
+import { View, Text, TextInput, TouchableOpacity, FlatList, StyleSheet, Modal, ScrollView, ActivityIndicator, Alert, Pressable, Animated, Keyboard } from 'react-native'
 import { useFocusEffect } from '@react-navigation/native'
 import { Ionicons } from '@expo/vector-icons'
 import db from '../data/db'
@@ -277,6 +277,7 @@ export default function POSScreen() {
   }
 
   function abrirGranel(p) {
+    Keyboard.dismiss()
     const existente = carritoActivo.items.find(it => it.id === p.id)
     setProductoGranel(p)
     setModoGranel('monto')
@@ -408,6 +409,9 @@ export default function POSScreen() {
 
   function abrirPago() {
     if (!carritoActivo.items.length) return
+    // Despedir el teclado ANTES de abrir: si queda abierto, Android lo esconde
+    // al cambiar de ventana sin avisar y la hoja flota a media pantalla.
+    Keyboard.dismiss()
     setMetodoPago(null)
     setMontoRecibido('')
     setClienteFiadoId(null)
@@ -467,7 +471,7 @@ export default function POSScreen() {
 
   return (
     <View style={styles.root}>
-      <AvisoLicencia estado={licencia} onVerCodigo={() => setModalLicencia(true)} />
+      <AvisoLicencia estado={licencia} onVerCodigo={() => { Keyboard.dismiss(); setModalLicencia(true) }} />
       {/* Selector de carritos / ventas en espera */}
       <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.tabsCarritos} contentContainerStyle={{ gap: 8, paddingHorizontal: 12 }}>
         {carritos.map(c => (
@@ -486,13 +490,13 @@ export default function POSScreen() {
 
       <View style={styles.filaBuscador}>
         <BarraBusqueda valor={busqueda} onCambiar={setBusqueda} textoGuia="Buscar producto..." />
-        <TouchableOpacity style={styles.botonEscanear} onPress={() => { setMensajeScanner(null); setScanner(true) }}>
+        <TouchableOpacity style={styles.botonEscanear} onPress={() => { Keyboard.dismiss(); setMensajeScanner(null); setScanner(true) }}>
           <Text style={styles.botonEscanearTexto}>📷</Text>
         </TouchableOpacity>
         {/* Pan, hielo, una bolsa: cosas que se venden todos los días y que
             nadie va a dar de alta como producto. Sin esta salida, esa venta se
             quedaba fuera del sistema y se llevaba el cuadre de caja con ella. */}
-        <TouchableOpacity style={styles.botonEscanear} onPress={() => { setMontoSuelto(''); setModalSuelto(true) }}>
+        <TouchableOpacity style={styles.botonEscanear} onPress={() => { Keyboard.dismiss(); setMontoSuelto(''); setModalSuelto(true) }}>
           <Text style={styles.botonSueltoTexto}>S/</Text>
         </TouchableOpacity>
       </View>

@@ -1,10 +1,11 @@
 import React, { useState, useCallback } from 'react'
-import { View, Text, TextInput, TouchableOpacity, FlatList, StyleSheet, Modal, ScrollView, Pressable, Alert, Linking } from 'react-native'
+import { View, Text, TextInput, TouchableOpacity, FlatList, StyleSheet, Modal, ScrollView, Pressable, Alert, Linking, Keyboard } from 'react-native'
 import { useFocusEffect } from '@react-navigation/native'
 import db from '../data/db'
 import BarraBusqueda from '../components/BarraBusqueda'
+import AvisoHoja from '../components/AvisoHoja'
 import { colors } from '../theme/colors'
-import { armarMensajeCobranza, abrirWhatsApp } from '../utils/cobranza'
+import { armarMensajeCobranza, abrirWhatsApp, aFormatoLlamada } from '../utils/cobranza'
 import { usePieDeHoja } from '../utils/teclado'
 import { coincide } from '../utils/texto'
 import { useSesion } from '../context/SesionContext'
@@ -34,6 +35,7 @@ export default function ClientesScreen() {
 
   const [telefonoEdit, setTelefonoEdit] = useState('')
   const [borradorMensaje, setBorradorMensaje] = useState(null)
+  const [avisoListo, setAvisoListo] = useState(null)
 
   useFocusEffect(useCallback(() => { cargar() }, []))
 
@@ -48,6 +50,7 @@ export default function ClientesScreen() {
   }
 
   function abrirDetalle(c) {
+    Keyboard.dismiss()
     setClienteDetalle(c)
     setFiados(db.getFiadoCliente(c.id))
     setTelefonoEdit(c.telefono || '')
@@ -65,7 +68,7 @@ export default function ClientesScreen() {
 
   // Tocar para llamar: el número también sirve para hablar, no solo WhatsApp.
   async function llamarPorTelefono() {
-    const numero = telefonoEdit.replace(/\D/g, '')
+    const numero = aFormatoLlamada(telefonoEdit)
     if (!numero) return
     try {
       await Linking.openURL(`tel:${numero}`)
@@ -132,14 +135,14 @@ export default function ClientesScreen() {
 
     const resto = r.saldo_restante > 0 ? `Le queda ${fmt(r.saldo_restante)}.` : 'Quedó al día. 🎉'
     const sobrante = r.sobrante > 0 ? `\n\nEscribiste ${fmt(r.sobrante)} más de lo que debía: solo se abonó su deuda.` : ''
-    Alert.alert('✓ Abono anotado', `Se abonaron ${fmt(r.abonado)}. ${resto}${sobrante}`)
+    setAvisoListo({ titulo: '✓ Abono anotado', mensaje: `Se abonaron ${fmt(r.abonado)}. ${resto}${sobrante}` })
   }
 
   return (
     <View style={styles.root}>
       <View style={styles.header}>
         <BarraBusqueda valor={busqueda} onCambiar={setBusqueda} textoGuia="Buscar casero..." />
-        <TouchableOpacity style={styles.botonNuevo} onPress={() => setModalNuevo(true)}><Text style={styles.botonNuevoTexto}>+ Cliente</Text></TouchableOpacity>
+        <TouchableOpacity style={styles.botonNuevo} onPress={() => { Keyboard.dismiss(); setModalNuevo(true) }}><Text style={styles.botonNuevoTexto}>+ Cliente</Text></TouchableOpacity>
       </View>
 
       <FlatList
@@ -175,7 +178,7 @@ export default function ClientesScreen() {
       <Modal visible={!!clienteDetalle} transparent animationType="slide" onRequestClose={cerrarDetalle}>
         <View style={[styles.modalFondo, { paddingBottom: alturaTeclado }]}>
           <Pressable style={StyleSheet.absoluteFill} onPress={cerrarDetalle} />
-          <ScrollView style={{ maxHeight: '80%' }} contentContainerStyle={[styles.modalCaja, { paddingBottom: 20 + espacioAbajo }]} keyboardShouldPersistTaps="handled">
+          <ScrollView style={{ maxHeight: '80%' }} contentContainerStyle={[styles.modalCaja, fiados.length === 0 && styles.modalCajaCorta, { paddingBottom: 20 + espacioAbajo }]} keyboardShouldPersistTaps="handled">
             <Text style={styles.modalTitulo}>{clienteDetalle?.nombre}</Text>
 
             {/* El teléfono se puede guardar siempre, deba o no: si solo apareciera
@@ -243,6 +246,14 @@ export default function ClientesScreen() {
                 puntual: un solo monto y la app lo reparte. Repartirlo a mano
                 fila por fila, con el cliente esperando, era más lento que el
                 cuaderno que vino a reemplazar. */}
+            {/* Sin deuda y con historial: tarjeta verde en vez del hueco que
+                quedaba al pagar todo. */}
+            {deudaTotal <= 0 && fiados.length > 0 && (
+              <View style={styles.bloqueAlDia}>
+                <Text style={styles.alDiaTitulo}>✓ Al día</Text>
+                <Text style={styles.alDiaTexto}>No debe nada. Lo que abonó quedó en el historial de abajo.</Text>
+              </View>
+            )}
             {deudaTotal > 0 && (
               <View style={styles.bloqueAbono}>
                 <Text style={styles.deudaLabel}>Debe en total</Text>
@@ -312,18 +323,32 @@ export default function ClientesScreen() {
 
             <Text style={styles.subtituloHistorial}>Historial de la libreta</Text>
             <View>
-              {fiados.length === 0 && <Text style={styles.vacio}>Sin historial de fiado.</Text>}
-              {fiados.map(f => (
+              {fiados.length === 0 ? (
+                <View style={styles.vacioCard}>
+                  <Text style={styles.vacioTitulo}>📋 Sin movimientos todavía</Text>
+                  <Text style={styles.vacioTexto}>Fíale su primera compra desde Vender y aparecerá acá.</Text>
+                </View>
+              ) : (
+                fiados.map(f => (
                 <View key={f.id} style={styles.fiadoFila}>
                   <Text style={styles.fiadoConcepto} numberOfLines={2}>{f.concepto}</Text>
                   <Text style={styles.fiadoFecha}>
                     {new Date(f.fecha).toLocaleDateString('es-PE')} · {f.estado === 'pagado' ? '✓ Pagado' : `Saldo: ${fmt(f.saldo)}`}
                   </Text>
                 </View>
-              ))}
+                ))
+              )}
             </View>
             <TouchableOpacity style={styles.botonGhost} onPress={cerrarDetalle}><Text style={styles.botonGhostTexto}>Cerrar</Text></TouchableOpacity>
           </ScrollView>
+          {avisoListo && (
+            <AvisoHoja
+              titulo={avisoListo.titulo}
+              mensaje={avisoListo.mensaje}
+              botones={[{ texto: 'Listo', primario: true }]}
+              onCerrar={() => setAvisoListo(null)}
+            />
+          )}
         </View>
       </Modal>
     </View>
@@ -342,8 +367,15 @@ const crearStyles = (tx) => ({
   deuda: { color: colors.warning, fontWeight: '700', fontSize: tx(13) },
   alDia: { color: colors.accent, fontSize: tx(13) },
   vacio: { color: colors.textMuted, textAlign: 'center', padding: 24, fontSize: tx(13) },
+  vacioCard: { borderWidth: 1, borderStyle: 'dashed', borderColor: colors.borderStrong, borderRadius: 12, padding: 16, alignItems: 'center', gap: 6, backgroundColor: colors.bg },
+  vacioTitulo: { color: colors.text, fontWeight: '700', fontSize: tx(15) },
+  vacioTexto: { color: colors.textMuted, fontSize: tx(13), textAlign: 'center', lineHeight: 18 },
   modalFondo: { flex: 1, backgroundColor: colors.overlay, justifyContent: 'flex-end' },
-  modalCaja: { backgroundColor: colors.card, borderTopLeftRadius: 20, borderTopRightRadius: 20, padding: 20, gap: 10 },
+  modalCaja: { backgroundColor: colors.card, borderTopLeftRadius: 20, borderTopRightRadius: 20, padding: 20, gap: 10, minHeight: 380 },
+  // Ficha vacía: la hoja se ancla abajo (cerca de gestos) y crece hacia
+  // arriba al llegar movimientos, con tope en el 85% del modal. Solo con
+  // contenido corto: con historial largo el flex-end recortaría lo de arriba.
+  modalCajaCorta: { minHeight: 460, justifyContent: 'flex-end' },
   modalScrollLimite: { flexGrow: 0, maxHeight: '85%' },
   modalTitulo: { color: colors.text, fontWeight: '700', fontSize: tx(16), marginBottom: 4 },
   input: { backgroundColor: colors.input, borderWidth: 1, borderColor: colors.border, borderRadius: 10, padding: 12, color: colors.text, fontSize: tx(15) },
@@ -373,6 +405,9 @@ const crearStyles = (tx) => ({
   botonDeshabilitado: { opacity: 0.5 },
 
   bloqueAbono: { marginTop: 12, padding: 14, borderRadius: 12, backgroundColor: colors.accentBg, borderWidth: 1, borderColor: colors.primary, gap: 8 },
+  bloqueAlDia: { marginTop: 12, padding: 14, borderRadius: 12, backgroundColor: colors.accentBg, borderWidth: 1, borderColor: colors.primary, gap: 4 },
+  alDiaTitulo: { color: colors.accent, fontWeight: '800', fontSize: tx(18) },
+  alDiaTexto: { color: colors.textMuted, fontSize: tx(13), lineHeight: 18 },
   deudaLabel: { color: colors.textMuted, fontSize: tx(13), fontWeight: '600' },
   deudaMonto: { color: colors.accent, fontWeight: '800', fontSize: tx(28) },
   metodoChip: { flex: 1, paddingVertical: 10, borderRadius: 10, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.card, alignItems: 'center' },

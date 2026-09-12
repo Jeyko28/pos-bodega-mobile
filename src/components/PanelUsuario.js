@@ -1,5 +1,5 @@
 import React, { useState } from 'react'
-import { View, Text, TextInput, TouchableOpacity, Modal, ScrollView, Pressable, StyleSheet, Alert } from 'react-native'
+import { View, Text, TextInput, TouchableOpacity, Modal, ScrollView, Pressable, StyleSheet, Alert, Keyboard } from 'react-native'
 import { Ionicons } from '@expo/vector-icons'
 import db from '../data/db'
 import BotonHeader from './BotonHeader'
@@ -31,6 +31,7 @@ export default function PanelUsuario() {
   const esAdmin = usuario?.rol === 'admin'
 
   function abrir() {
+    Keyboard.dismiss()
     setVista('menu')
     setAbierto(true)
   }

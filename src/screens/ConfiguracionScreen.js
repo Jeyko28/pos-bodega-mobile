@@ -1,5 +1,5 @@
 import React, { useState, useCallback, useEffect } from 'react'
-import { View, Text, TextInput, TouchableOpacity, StyleSheet, Alert, Modal, Linking } from 'react-native'
+import { View, Text, TextInput, TouchableOpacity, StyleSheet, Alert, Modal, Linking, Keyboard } from 'react-native'
 import { KeyboardAwareScrollView } from 'react-native-keyboard-aware-scroll-view'
 import { useFocusEffect } from '@react-navigation/native'
 import { File, Paths } from 'expo-file-system'
@@ -326,7 +326,7 @@ export default function ConfiguracionScreen() {
               ? '⏸️ Tus 30 días gratis terminaron. Activa tu pago único para seguir vendiendo.'
               : `🎉 Estás en tus 30 días gratis (te quedan ${licencia?.restantes ?? '…'}).`}
         </Text>
-        <TouchableOpacity style={styles.botonSecundario} onPress={() => setModalLicencia(true)}>
+        <TouchableOpacity style={styles.botonSecundario} onPress={() => { Keyboard.dismiss(); setModalLicencia(true) }}>
           <Text style={styles.botonSecundarioTexto}>
             {licencia?.modo === 'activa' ? 'Ver mi licencia' : 'Ver mi código / Activar'}
           </Text>

@@ -1,5 +1,5 @@
 import React, { useState, useCallback } from 'react'
-import { View, Text, TextInput, TouchableOpacity, FlatList, StyleSheet, Modal, Alert, ScrollView, Pressable } from 'react-native'
+import { View, Text, TextInput, TouchableOpacity, FlatList, StyleSheet, Modal, Alert, ScrollView, Pressable, Keyboard } from 'react-native'
 import { useFocusEffect } from '@react-navigation/native'
 import db from '../data/db'
 import { colors } from '../theme/colors'
@@ -75,12 +75,14 @@ export default function ProductosScreen() {
   }
 
   function abrirNuevo() {
+    Keyboard.dismiss()
     setEditando(null)
     setForm({ nombre: '', precio: '', categoria: '', tipo_venta: 'unidad', unidad: 'kg', codigo: '', bultoNombre: '', bultoUnidades: '', bultoCodigo: '' })
     setModal(true)
   }
 
   function abrirEditar(p) {
+    Keyboard.dismiss()
     setEditando(p)
     setForm({ nombre: p.nombre, precio: String(p.precio), categoria: p.categoria || '', tipo_venta: p.tipo_venta, unidad: p.unidad || 'kg', codigo: p.codigo || '', bultoNombre: p.bulto_nombre || '', bultoUnidades: p.bulto_unidades ? String(p.bulto_unidades) : '', bultoCodigo: p.bulto_codigo || '' })
     setModal(true)
@@ -141,7 +143,7 @@ export default function ProductosScreen() {
       </View>
 
       {productos.length > 0 && (
-        <TouchableOpacity style={styles.botonIngreso} onPress={() => setIngreso(true)}>
+        <TouchableOpacity style={styles.botonIngreso} onPress={() => { Keyboard.dismiss(); setIngreso(true) }}>
           <Text style={styles.botonIngresoTexto}>📦  Ingresar mercadería</Text>
           <Text style={styles.botonIngresoAyuda}>Llegó el proveedor · suma al stock</Text>
         </TouchableOpacity>
@@ -191,7 +193,7 @@ export default function ProductosScreen() {
         ListEmptyComponent={
           <View style={styles.vacioCaja}>
             <Text style={styles.vacio}>Todavía no tienes productos cargados.</Text>
-            <TouchableOpacity style={styles.botonCatalogo} onPress={() => setCatalogo(true)}>
+            <TouchableOpacity style={styles.botonCatalogo} onPress={() => { Keyboard.dismiss(); setCatalogo(true) }}>
               <Text style={styles.botonCatalogoTexto}>📋  Empezar con productos comunes</Text>
             </TouchableOpacity>
             <Text style={styles.vacioAyuda}>
@@ -200,7 +202,7 @@ export default function ProductosScreen() {
           </View>
         }
         ListFooterComponent={filtrados.length > 0 ? (
-          <TouchableOpacity style={styles.enlaceCatalogo} onPress={() => setCatalogo(true)}>
+            <TouchableOpacity style={styles.enlaceCatalogo} onPress={() => { Keyboard.dismiss(); setCatalogo(true) }}>
             <Text style={styles.enlaceCatalogoTexto}>📋  Agregar productos comunes de bodega</Text>
           </TouchableOpacity>
         ) : null}

@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react'
-import { View, Text, TextInput, TouchableOpacity, ScrollView, StyleSheet, Alert } from 'react-native'
+import { View, Text, TextInput, TouchableOpacity, ScrollView, StyleSheet, Alert, Keyboard } from 'react-native'
 import { KeyboardAwareScrollView } from 'react-native-keyboard-aware-scroll-view'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { Ionicons } from '@expo/vector-icons'
@@ -8,6 +8,7 @@ import db from '../data/db'
 import BarcodeScannerModal from './BarcodeScannerModal'
 import { iconoCategoria } from '../data/categorias'
 import { coincide } from '../utils/texto'
+import AvisoHoja from './AvisoHoja'
 import { useLetra } from '../context/LetraContext'
 import { PRESETS_BULTO, sugerirBulto, resolverBulto, sugerirPrecio } from '../data/bultos'
 import { colors } from '../theme/colors'
@@ -30,6 +31,7 @@ export default function IngresoMercaderia({ onCerrar, onGuardado }) {
   const [mensajeScanner, setMensajeScanner] = useState(null)
   const [retomado, setRetomado] = useState(0)
   const [cargado, setCargado] = useState(false)
+  const [avisoExito, setAvisoExito] = useState(null)
   const [codigoDesconocido, setCodigoDesconocido] = useState(null)
   const [nuevo, setNuevo] = useState({ nombre: '', precio: '', cantidad: '1' })
   const [ultimoAgregado, setUltimoAgregado] = useState(null)
@@ -253,23 +255,14 @@ export default function IngresoMercaderia({ onCerrar, onGuardado }) {
 
     // El deshacer se ofrece en el momento, que es cuando el dueño se da cuenta
     // de que escribió 500 en vez de 50.
-    Alert.alert(
-      '✓ Mercadería ingresada',
-      `Se actualizó el stock de ${r.actualizados} productos.`,
-      [
-        { text: 'Listo', onPress: onCerrar },
-        {
-          text: 'Deshacer',
-          style: 'destructive',
-          onPress: async () => {
-            const d = await db.deshacerIngreso(r.ingresoId)
-            if (!d.success) { Alert.alert('No se pudo deshacer', d.error); return }
-            onGuardado?.({ actualizados: 0 })
-            Alert.alert('Ingreso deshecho', 'El stock volvió a como estaba.')
-          },
-        },
-      ],
-    )
+    setAvisoExito({ titulo: '✓ Mercadería ingresada', mensaje: `Se actualizó el stock de ${r.actualizados} productos.`, ingresoId: r.ingresoId })
+  }
+
+  async function deshacerUltimoIngreso() {
+    const d = await db.deshacerIngreso(avisoExito.ingresoId)
+    if (!d.success) { Alert.alert('No se pudo deshacer', d.error); return }
+    onGuardado?.({ actualizados: 0 })
+    setAvisoExito({ titulo: 'Ingreso deshecho', mensaje: 'El stock volvió a como estaba.' })
   }
 
   function abrirHistorial() {
@@ -386,7 +379,7 @@ export default function IngresoMercaderia({ onCerrar, onGuardado }) {
           value={busqueda}
           onChangeText={setBusqueda}
         />
-        <TouchableOpacity style={styles.botonEscanear} onPress={() => setScanner(true)}>
+        <TouchableOpacity style={styles.botonEscanear} onPress={() => { Keyboard.dismiss(); setScanner(true) }}>
           <Ionicons name="barcode-outline" size={24} color={colors.text} />
         </TouchableOpacity>
       </View>
@@ -638,6 +631,20 @@ export default function IngresoMercaderia({ onCerrar, onGuardado }) {
           </Text>
         </TouchableOpacity>
       </View>
+
+      {avisoExito && (
+        <AvisoHoja
+          titulo={avisoExito.titulo}
+          mensaje={avisoExito.mensaje}
+          botones={avisoExito.ingresoId
+            ? [
+              { texto: 'Listo', primario: true, onPress: () => { setAvisoExito(null); onCerrar() } },
+              { texto: 'Deshacer', onPress: deshacerUltimoIngreso },
+            ]
+            : [{ texto: 'Entendido', primario: true, onPress: () => setAvisoExito(null) }]}
+          onCerrar={() => setAvisoExito(null)}
+        />
+      )}
     </View>
   )
 }
