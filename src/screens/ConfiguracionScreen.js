@@ -1,5 +1,5 @@
 import React, { useState, useCallback, useEffect } from 'react'
-import { View, Text, TextInput, TouchableOpacity, StyleSheet, Alert, Modal, Linking, Keyboard } from 'react-native'
+import { View, Text, TextInput, TouchableOpacity, StyleSheet, Modal, Linking, Keyboard } from 'react-native'
 import { KeyboardAwareScrollView } from 'react-native-keyboard-aware-scroll-view'
 import { useFocusEffect } from '@react-navigation/native'
 import { File, Paths } from 'expo-file-system'
@@ -11,12 +11,14 @@ import { configDeRequest, DISCOVERY, intercambiarCodigoPorTokens, hayCuentaConec
 import { safDisponible, hayCarpetaElegida, elegirCarpetaPublica, olvidarCarpeta } from '../data/respaldoCarpeta'
 import LicenciaScreen from './LicenciaScreen'
 import { useLetra } from '../context/LetraContext'
+import AvisoHoja from '../components/AvisoHoja'
 import { WS_VENTAS, mensajeSoporte } from '../data/licencia'
 import { abrirWhatsApp } from '../utils/cobranza'
 import { colors } from '../theme/colors'
 
 export default function ConfiguracionScreen() {
-  const { grande, alternar } = useLetra()
+  const { grande, alternar, tx } = useLetra()
+  const styles = crearStyles(tx)
   const [config, setConfig] = useState(null)
   const [guardando, setGuardando] = useState(false)
   const [exito, setExito] = useState(false)
@@ -27,6 +29,7 @@ export default function ConfiguracionScreen() {
   const [conectandoDrive, setConectandoDrive] = useState(false)
   const [licencia, setLicencia] = useState(null)
   const [modalLicencia, setModalLicencia] = useState(false)
+  const [aviso, setAviso] = useState(null)
   const [request, response, promptAsync] = AuthSession.useAuthRequest(configDeRequest(), DISCOVERY)
 
   async function exportarBackup() {
@@ -41,10 +44,10 @@ export default function ConfiguracionScreen() {
       if (disponible) {
         await Sharing.shareAsync(file.uri, { mimeType: 'application/json', dialogTitle: 'Guardar respaldo de POS Bodega' })
       } else {
-        Alert.alert('No disponible', 'Este dispositivo no puede compartir archivos.')
+        setAviso({ titulo: 'No disponible', mensaje: 'Este dispositivo no puede compartir archivos.' })
       }
     } catch (e) {
-      Alert.alert('Error', 'No se pudo generar el respaldo.')
+      setAviso({ titulo: 'Error', mensaje: 'No se pudo generar el respaldo.' })
     }
     setExportando(false)
   }
@@ -64,7 +67,7 @@ export default function ConfiguracionScreen() {
     setConectandoDrive(true)
     intercambiarCodigoPorTokens(response.params.code, request.codeVerifier)
       .then(() => setDriveConectado(true))
-      .catch(() => Alert.alert('Error', 'No se pudo conectar con Google Drive.'))
+      .catch(() => setAviso({ titulo: 'Error', mensaje: 'No se pudo conectar con Google Drive.' }))
       .finally(() => setConectandoDrive(false))
   }, [response])
 
@@ -75,10 +78,14 @@ export default function ConfiguracionScreen() {
   }
 
   function confirmarDesconectarDrive() {
-    Alert.alert('Desconectar Google Drive', '¿Seguro? Los respaldos futuros dejarán de subirse a Drive hasta que vuelvas a conectar la cuenta.', [
-      { text: 'Cancelar', style: 'cancel' },
-      { text: 'Desconectar', style: 'destructive', onPress: async () => { await desconectarCuenta(); setDriveConectado(false) } },
-    ])
+    setAviso({
+      titulo: 'Desconectar Google Drive',
+      mensaje: '¿Seguro? Los respaldos futuros dejarán de subirse a Drive hasta que vuelvas a conectar la cuenta.',
+      botones: [
+        { texto: 'Cancelar' },
+        { texto: 'Desconectar', peligro: true, onPress: async () => { setAviso(null); await desconectarCuenta(); setDriveConectado(false) } },
+      ],
+    })
   }
 
   const carpetaElegida = config ? hayCarpetaElegida(config) : false
@@ -89,10 +96,14 @@ export default function ConfiguracionScreen() {
   }
 
   function confirmarOlvidarCarpeta() {
-    Alert.alert('Cambiar carpeta', 'Se te va a pedir elegir una carpeta nueva (puede ser la misma). Los respaldos ya guardados en la anterior no se mueven.', [
-      { text: 'Cancelar', style: 'cancel' },
-      { text: 'Elegir otra', onPress: async () => { await olvidarCarpeta(); await elegirCarpeta() } },
-    ])
+    setAviso({
+      titulo: 'Cambiar carpeta',
+      mensaje: 'Se te va a pedir elegir una carpeta nueva (puede ser la misma). Los respaldos ya guardados en la anterior no se mueven.',
+      botones: [
+        { texto: 'Cancelar' },
+        { texto: 'Elegir otra', primario: true, onPress: async () => { setAviso(null); await olvidarCarpeta(); await elegirCarpeta() } },
+      ],
+    })
   }
 
   async function restaurarRespaldo() {
@@ -103,28 +114,28 @@ export default function ConfiguracionScreen() {
       const texto = await elegido.result.text()
       datos = JSON.parse(texto)
     } catch (e) {
-      Alert.alert('No se pudo leer', 'El archivo no se pudo abrir o no es un JSON válido.')
+      setAviso({ titulo: 'No se pudo leer', mensaje: 'El archivo no se pudo abrir o no es un JSON válido.' })
       return
     }
 
     const { valido, error, resumen } = db.validarBackup(datos)
     if (!valido) {
-      Alert.alert('Archivo no válido', error)
+      setAviso({ titulo: 'Archivo no válido', mensaje: error })
       return
     }
 
-    Alert.alert(
-      '¿Restaurar este respaldo?',
-      `Contiene ${resumen.productos} productos, ${resumen.ventas} ventas, ${resumen.clientes} clientes y ${resumen.fiados} fiados pendientes` +
+    setAviso({
+      titulo: '¿Restaurar este respaldo?',
+      mensaje: `Contiene ${resumen.productos} productos, ${resumen.ventas} ventas, ${resumen.clientes} clientes y ${resumen.fiados} fiados pendientes` +
       `${resumen.negocio ? ` de "${resumen.negocio}"` : ''}.\n\n` +
       'Se reemplazarán TODOS los datos actuales de este teléfono. Antes de hacerlo se guarda una copia de lo que tienes ahora, por si te arrepientes.\n\n' +
       'Tus usuarios y contraseñas no cambian.',
-      [
-        { text: 'Cancelar', style: 'cancel' },
+      botones: [
+        { texto: 'Cancelar' },
         {
-          text: 'Restaurar',
-          style: 'destructive',
+          texto: 'Restaurar', peligro: true,
           onPress: async () => {
+            setAviso(null)
             setRestaurando(true)
             // Copia de seguridad del estado actual antes de pisarlo: si el
             // respaldo elegido resulta ser el equivocado, no se pierde nada.
@@ -132,29 +143,30 @@ export default function ConfiguracionScreen() {
             const r = await db.restaurarBackup(datos)
             setRestaurando(false)
             if (!r.success) {
-              Alert.alert('No se pudo restaurar', r.error)
+              setAviso({ titulo: 'No se pudo restaurar', mensaje: r.error })
               return
             }
             setConfig(db.getConfig())
             setRespaldos(listarRespaldos())
-            Alert.alert('✓ Restaurado', 'Tus datos volvieron. Revisa Productos e Historial para confirmar.')
+            setAviso({ titulo: '✓ Restaurado', mensaje: 'Tus datos volvieron. Revisa Productos e Historial para confirmar.' })
           },
         },
       ],
-    )
+    })
   }
 
   async function compartirArchivo(uri) {
     const disponible = await Sharing.isAvailableAsync()
     if (!disponible) {
-      Alert.alert('No disponible', 'Este dispositivo no puede compartir archivos.')
+      setAviso({ titulo: 'No disponible', mensaje: 'Este dispositivo no puede compartir archivos.' })
       return
     }
     await Sharing.shareAsync(uri, { mimeType: 'application/json', dialogTitle: 'Enviar respaldo de POS Bodega' })
   }
 
   async function hablarConSoporte() {
-    await abrirWhatsApp({ telefono: WS_VENTAS, mensaje: mensajeSoporte({ negocio: config?.negocio_nombre }) })
+    const r = await abrirWhatsApp({ telefono: WS_VENTAS, mensaje: mensajeSoporte({ negocio: config?.negocio_nombre }) })
+    if (!r.ok) setAviso({ titulo: 'No se pudo abrir WhatsApp', mensaje: r.error })
   }
 
   // Google exige el aviso de privacidad visible dentro de la app.
@@ -162,7 +174,7 @@ export default function ConfiguracionScreen() {
     try {
       await Linking.openURL('https://jeyko28.github.io/pos-bodega-legal/privacidad.html')
     } catch {
-      Alert.alert('No se pudo abrir', 'Revisa tu conexión e inténtalo de nuevo.')
+      setAviso({ titulo: 'No se pudo abrir', mensaje: 'Revisa tu conexión e inténtalo de nuevo.' })
     }
   }
 
@@ -184,6 +196,7 @@ export default function ConfiguracionScreen() {
   if (!config) return <View style={styles.root} />
 
   return (
+    <View style={{ flex: 1, backgroundColor: colors.bg }}>
     <KeyboardAwareScrollView
       style={styles.root}
       contentContainerStyle={{ padding: 16, paddingBottom: 24, gap: 16 }}
@@ -220,10 +233,6 @@ export default function ConfiguracionScreen() {
         <TextInput style={styles.input} placeholderTextColor={colors.placeholder} keyboardType="number-pad"
           value={String(config.umbral_stock_bajo ?? 5)} onChangeText={v => setConfig(c => ({ ...c, umbral_stock_bajo: parseInt(v) || 0 }))} />
       </View>
-
-      <TouchableOpacity style={styles.botonGuardar} onPress={guardar} disabled={guardando}>
-        <Text style={styles.botonGuardarTexto}>{exito ? '✓ Guardado' : guardando ? 'Guardando...' : 'Guardar cambios'}</Text>
-      </TouchableOpacity>
 
       <View style={styles.tarjeta}>
         <Text style={styles.tituloSeccion}>🗄️ Copia de seguridad</Text>
@@ -312,8 +321,8 @@ export default function ConfiguracionScreen() {
           <Text style={styles.botonSecundarioTexto}>{exportando ? 'Generando...' : '📤 Exportar backup ahora'}</Text>
         </TouchableOpacity>
 
-        <TouchableOpacity style={styles.botonSecundario} onPress={restaurarRespaldo} disabled={restaurando}>
-          <Text style={styles.botonSecundarioTexto}>{restaurando ? 'Restaurando...' : '♻️ Restaurar desde un archivo'}</Text>
+        <TouchableOpacity style={[styles.botonSecundario, styles.botonPeligro]} onPress={restaurarRespaldo} disabled={restaurando}>
+          <Text style={[styles.botonSecundarioTexto, styles.botonPeligroTexto]}>{restaurando ? 'Restaurando...' : '♻️ Restaurar desde un archivo'}</Text>
         </TouchableOpacity>
       </View>
 
@@ -372,39 +381,60 @@ export default function ConfiguracionScreen() {
         <View style={{ flex: 1, backgroundColor: colors.bg, paddingTop: 48 }}>
           <TouchableOpacity onPress={() => setModalLicencia(false)}
             style={{ alignSelf: 'flex-end', marginRight: 16, marginBottom: 4, paddingHorizontal: 14, paddingVertical: 10 }}>
-            <Text style={{ color: colors.textMuted, fontWeight: '700', fontSize: 15 }}>✕ Cerrar</Text>
+            <Text style={{ color: colors.textMuted, fontWeight: '700', fontSize: tx(15) }}>✕ Cerrar</Text>
           </TouchableOpacity>
           <LicenciaScreen onActivada={() => { setModalLicencia(false); setLicencia(db.getEstadoLicencia()) }} />
         </View>
       </Modal>
     </KeyboardAwareScrollView>
+
+    {/* Guardar siempre visible: quedaba 3 tarjetas más abajo y se perdían cambios. */}
+    <View style={styles.pieGuardar}>
+      <TouchableOpacity style={styles.botonGuardar} onPress={guardar} disabled={guardando}>
+        <Text style={styles.botonGuardarTexto}>{exito ? '✓ Guardado' : guardando ? 'Guardando...' : 'Guardar cambios'}</Text>
+      </TouchableOpacity>
+    </View>
+
+      {aviso && (
+        <AvisoHoja
+          titulo={aviso.titulo}
+          mensaje={aviso.mensaje}
+          botones={aviso.botones || [{ texto: 'Entendido', primario: true }]}
+          onCerrar={() => setAviso(null)}
+        />
+      )}
+    </View>
   )
 }
 
-const styles = StyleSheet.create({
+// Los tamaños de letra pasan por tx() para el interruptor "Letra grande".
+const crearStyles = (tx) => ({
   root: { flex: 1, backgroundColor: colors.bg },
   tarjeta: { backgroundColor: colors.card, borderRadius: 12, borderWidth: 1, borderColor: colors.border, padding: 16, gap: 8 },
-  tituloSeccion: { color: colors.text, fontWeight: '700', fontSize: 15, marginBottom: 4 },
-  etiqueta: { color: colors.textMuted, fontSize: 13, fontWeight: '700', textTransform: 'uppercase', letterSpacing: 0.5 },
+  tituloSeccion: { color: colors.text, fontWeight: '700', fontSize: tx(15), marginBottom: 4 },
+  etiqueta: { color: colors.textMuted, fontSize: tx(13), fontWeight: '700' },
   frecuenciaFila: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
   frecuenciaChip: { paddingHorizontal: 12, height: 44, justifyContent: 'center', borderRadius: 999, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.input },
   frecuenciaChipActivo: { backgroundColor: colors.accentBg, borderColor: colors.primary },
-  frecuenciaTexto: { color: colors.textMuted, fontWeight: '600', fontSize: 13, lineHeight: 18 },
+  frecuenciaTexto: { color: colors.textMuted, fontWeight: '600', fontSize: tx(13), lineHeight: 18 },
   frecuenciaTextoActivo: { color: colors.accent },
   destinoFila: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: 10, paddingHorizontal: 12, borderRadius: 10, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.bg },
-  destinoTexto: { color: colors.text, fontSize: 14, fontWeight: '600' },
-  destinoEstado: { color: colors.textMuted, fontSize: 13 },
+  destinoTexto: { color: colors.text, fontSize: tx(14), fontWeight: '600' },
+  destinoEstado: { color: colors.textMuted, fontSize: tx(13) },
   destinoEstadoActivo: { color: colors.accent, fontWeight: '700' },
-  destinoAccion: { color: colors.accent, fontSize: 13, fontWeight: '700' },
+  destinoAccion: { color: colors.accent, fontSize: tx(13), fontWeight: '700' },
   respaldoFila: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: 10, paddingHorizontal: 12, borderRadius: 10, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.bg },
-  respaldoFecha: { color: colors.text, fontSize: 13 },
-  respaldoAccion: { color: colors.accent, fontSize: 13, fontWeight: '700' },
-  textoAdvertencia: { color: colors.warning, fontSize: 13, lineHeight: 17 },
-  input: { backgroundColor: colors.input, borderWidth: 1, borderColor: colors.border, borderRadius: 10, padding: 12, color: colors.text, fontSize: 15 },
+  respaldoFecha: { color: colors.text, fontSize: tx(13) },
+  respaldoAccion: { color: colors.accent, fontSize: tx(13), fontWeight: '700' },
+  textoAdvertencia: { color: colors.warning, fontSize: tx(13), lineHeight: 17 },
+  input: { backgroundColor: colors.input, borderWidth: 1, borderColor: colors.border, borderRadius: 10, padding: 12, color: colors.text, fontSize: tx(15) },
   botonGuardar: { backgroundColor: colors.primary, borderRadius: 12, padding: 16, alignItems: 'center' },
-  botonGuardarTexto: { color: colors.primaryText, fontWeight: '700', fontSize: 16 },
-  textoAyuda: { color: colors.textMuted, fontSize: 13, lineHeight: 18 },
+  botonGuardarTexto: { color: colors.primaryText, fontWeight: '700', fontSize: tx(16) },
+  textoAyuda: { color: colors.textoAyuda, fontSize: tx(14), lineHeight: 19 },
   botonSecundario: { backgroundColor: colors.accentBg, borderWidth: 1, borderColor: colors.primary, borderRadius: 10, padding: 14, alignItems: 'center', marginTop: 4 },
-  botonSecundarioTexto: { color: colors.accent, fontWeight: '700', fontSize: 14 },
-  version: { color: colors.textMuted, fontSize: 13, textAlign: 'center', marginTop: 8 },
+  botonSecundarioTexto: { color: colors.accent, fontWeight: '700', fontSize: tx(14) },
+  botonPeligro: { backgroundColor: colors.dangerBg, borderColor: colors.danger },
+  botonPeligroTexto: { color: colors.danger },
+  pieGuardar: { padding: 16, paddingTop: 12, backgroundColor: colors.card, borderTopWidth: 1, borderTopColor: colors.border },
+  version: { color: colors.textMuted, fontSize: tx(13), textAlign: 'center', marginTop: 8 },
 })

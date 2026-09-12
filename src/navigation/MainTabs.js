@@ -64,7 +64,9 @@ export default function MainTabs() {
   function actualizarAlertas() {
     const productos = db.getProductosBajoStock()
     setBajoStock(productos.length)
-    setAvisos(construirAvisos({ bajoStock: productos, fiadosAntiguos: db.getFiadosAntiguos() }))
+    // La campanita es solo para fiados viejos: el stock bajo ya tiene su chip
+    // con número en Productos, y triple alarma cansa.
+    setAvisos(construirAvisos({ bajoStock: [], fiadosAntiguos: db.getFiadosAntiguos() }))
     setVentasBloqueadas(db.getEstadoLicencia().bloqueado)
   }
 
@@ -106,7 +108,7 @@ export default function MainTabs() {
         tabBarBadgeStyle: { backgroundColor: colors.warning, color: '#fff' },
       }} />
       <Tab.Screen name="Clientes" component={ClientesScreen} />
-      <Tab.Screen name="Historial" component={HistorialScreen} />
+      <Tab.Screen name="Historial" component={HistorialScreen} options={{ title: 'Caja y ventas' }} />
     </Tab.Navigator>
   )
 }

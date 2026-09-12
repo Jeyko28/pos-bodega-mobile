@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react'
-import { View, Text, TextInput, TouchableOpacity, FlatList, StyleSheet, Modal, ScrollView, ActivityIndicator, Alert, Pressable, Animated, Keyboard } from 'react-native'
-import { useFocusEffect } from '@react-navigation/native'
+import { View, Text, TextInput, TouchableOpacity, FlatList, StyleSheet, Modal, ScrollView, ActivityIndicator, Pressable, Animated, Keyboard } from 'react-native'
+import { useFocusEffect, useNavigation } from '@react-navigation/native'
 import { Ionicons } from '@expo/vector-icons'
 import db from '../data/db'
 import { useSesion } from '../context/SesionContext'
@@ -9,8 +9,10 @@ import { CATEGORIAS_BASE, iconoCategoria } from '../data/categorias'
 import { coincide, esElMismo } from '../utils/texto'
 import { usePieDeHoja } from '../utils/teclado'
 import BarcodeScannerModal from '../components/BarcodeScannerModal'
+import IngresoMercaderia from '../components/IngresoMercaderia'
 import BarraBusqueda from '../components/BarraBusqueda'
 import AvisoLicencia from '../components/AvisoLicencia'
+import AvisoHoja from '../components/AvisoHoja'
 import LicenciaScreen from './LicenciaScreen'
 import { useLetra } from '../context/LetraContext'
 import { chips } from '../theme/chips'
@@ -19,6 +21,9 @@ import * as Haptics from 'expo-haptics'
 const fmt = (n) => `S/ ${Number(n).toFixed(2)}`
 const formatearPeso = (n) => parseFloat(Number(n).toFixed(3)).toString()
 const METODOS = ['Efectivo', 'Yape', 'Plin', 'Fiado']
+// Yape y Plin se confunden con apuro: además del nombre, cada uno tiñe su
+// chip con su color cuando está elegido.
+const COLOR_METODO = { Yape: '#7B2D8B', Plin: '#0284C7' }
 // En una bodega el cliente pide por plata ("dame dos soles de azúcar") mucho más
 // seguido que por peso, así que el modo por monto es el que va por defecto.
 const MONTOS_RAPIDOS = [1, 2, 5, 10]
@@ -48,6 +53,7 @@ function nuevoCarrito(carritosActuales = []) {
 
 export default function POSScreen() {
   const { usuario } = useSesion()
+  const navigation = useNavigation()
   const { tx } = useLetra()
   const styles = crearStyles(tx)
   const { alturaTeclado, espacioAbajo } = usePieDeHoja()
@@ -80,6 +86,8 @@ export default function POSScreen() {
   const [montoSuelto, setMontoSuelto] = useState('')
   const [licencia, setLicencia] = useState(() => db.getEstadoLicencia())
   const [modalLicencia, setModalLicencia] = useState(false)
+  const [modalIngreso, setModalIngreso] = useState(false)
+  const [avisoHoja, setAvisoHoja] = useState(null)
   // Carrito plegado: en pantalla chica la lista tapa los productos.
   // Solo quedan Total + Cobrar a la vista.
   const [carritoPlegado, setCarritoPlegado] = useState(false)
@@ -100,7 +108,7 @@ export default function POSScreen() {
       Animated.timing(avisoOpacidad, { toValue: 0, duration: 400, useNativeDriver: true }).start(({ finished }) => {
         if (finished) setAviso(null)
       })
-    }, 3500)
+    }, 6000)
   }
 
   useFocusEffect(useCallback(() => { cargar() }, []))
@@ -189,7 +197,7 @@ export default function POSScreen() {
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning)
       setScanner(false)
       if (pb) {
-        Alert.alert('Es el paquete grande', `Ese código es del paquete de "${pb.nombre}". Para vender, escanea una unidad, no el paquete.`)
+        setAvisoHoja({ titulo: 'Es el paquete grande', mensaje: `Ese código es del paquete de "${pb.nombre}". Para vender, escanea una unidad, no el paquete.` })
         return
       }
       setTimeout(() => setCodigoHuerfano(buscado), 350)
@@ -238,7 +246,7 @@ export default function POSScreen() {
   async function engancharCodigo(producto) {
     const r = await db.asignarCodigo(producto.id, codigoHuerfano)
     if (!r.success) {
-      Alert.alert('No se pudo', r.error)
+      setAvisoHoja({ titulo: 'No se pudo', mensaje: r.error })
       return
     }
     await cargar()
@@ -262,18 +270,31 @@ export default function POSScreen() {
     actualizarCarritoActivo(nuevos)
   }
 
-  // Quitar de un toque: corregir con − toquecito por toquecito y con cola
-  // no funciona. Borrar todo pide confirmación: un dedo grueso perdona menos.
+  // Quitar de un toque borraba sin red con dedo grueso: confirma antes,
+  // igual que Borrar todo.
   function quitarDelCarrito(productoId) {
-    actualizarCarritoActivo(carritoActivo.items.filter(it => it.id !== productoId))
+    const it = carritoActivo.items.find(x => x.id === productoId)
+    if (!it) return
+    setAvisoHoja({
+      titulo: `¿Quitar ${it.nombre}?`,
+      mensaje: 'Se quita solo de este carrito, el producto sigue en tu lista.',
+      botones: [
+        { texto: 'Cancelar' },
+        { texto: 'Quitar', peligro: true, onPress: () => { setAvisoHoja(null); actualizarCarritoActivo(carritoActivo.items.filter(x => x.id !== productoId)) } },
+      ],
+    })
   }
 
   function borrarCarrito() {
     if (!carritoActivo.items.length) return
-    Alert.alert('Borrar carrito', `¿Quitar todo lo de ${carritoActivo.nombre} (${carritoActivo.items.length})?`, [
-      { text: 'Cancelar', style: 'cancel' },
-      { text: 'Borrar todo', style: 'destructive', onPress: () => actualizarCarritoActivo([]) },
-    ])
+    setAvisoHoja({
+      titulo: 'Borrar carrito',
+      mensaje: `¿Quitar todo lo de ${carritoActivo.nombre} (${carritoActivo.items.length})?`,
+      botones: [
+        { texto: 'Cancelar' },
+        { texto: 'Borrar todo', peligro: true, onPress: () => { setAvisoHoja(null); actualizarCarritoActivo([]) } },
+      ],
+    })
   }
 
   function abrirGranel(p) {
@@ -455,7 +476,7 @@ export default function POSScreen() {
         : `✓ Venta registrada — ${fmt(resultado.total)}`)
     } catch (e) {
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error)
-      Alert.alert('No se pudo cobrar', e?.message || 'No se pudo registrar la venta.')
+      setAvisoHoja({ titulo: 'No se pudo cobrar', mensaje: e?.message || 'No se pudo registrar la venta.' })
     }
     setCobrando(false)
   }
@@ -487,6 +508,18 @@ export default function POSScreen() {
           <Text style={styles.tabNuevoTexto}>+ Nuevo cliente</Text>
         </TouchableOpacity>
       </ScrollView>
+
+      {/* Accesos directos con nombre claro: lo que más se busca (caja e
+          ingreso) a un toque desde Vender. */}
+      <Text style={styles.pistaTabs}>Mantén apretado un carrito vacío para cerrarlo.</Text>
+      <View style={styles.filaAtajos}>
+        <TouchableOpacity style={styles.botonAtajo} onPress={() => { Keyboard.dismiss(); setModalIngreso(true) }}>
+          <Text style={styles.botonAtajoTexto}>📦  Ingresar mercadería</Text>
+        </TouchableOpacity>
+        <TouchableOpacity style={styles.botonAtajo} onPress={() => navigation.navigate('Historial')}>
+          <Text style={styles.botonAtajoTexto}>💰  Caja</Text>
+        </TouchableOpacity>
+      </View>
 
       <View style={styles.filaBuscador}>
         <BarraBusqueda valor={busqueda} onCambiar={setBusqueda} textoGuia="Buscar producto..." />
@@ -582,8 +615,8 @@ export default function POSScreen() {
       {/* Carrito activo */}
       <View style={styles.panelCarrito}>
         {!carritoPlegado && (
-        <ScrollView style={{ maxHeight: 160 }}>
-          {carritoActivo.items.length === 0 && <Text style={styles.vacio}>Carrito de {carritoActivo.nombre} vacío — toca un producto para agregarlo.</Text>}
+        <ScrollView style={{ maxHeight: 120 }}>
+          {carritoActivo.items.length === 0 && <Text style={styles.vacio}>Toca un producto para empezar.</Text>}
           {carritoActivo.items.map(it => (
             <View key={it.id} style={styles.filaCarrito}>
               <Text style={styles.itemNombre} numberOfLines={1}>{it.nombre}</Text>
@@ -717,8 +750,8 @@ export default function POSScreen() {
             <Text style={styles.modalTitulo}>Método de pago — {fmt(total)}</Text>
             <View style={styles.metodosGrid}>
               {METODOS.map(m => (
-                <TouchableOpacity key={m} onPress={() => setMetodoPago(m)} style={[styles.metodoBoton, metodoPago === m && styles.metodoBotonActivo]}>
-                  <Text style={[styles.metodoTexto, metodoPago === m && styles.metodoTextoActivo]}>{m}</Text>
+                <TouchableOpacity key={m} onPress={() => setMetodoPago(m)} style={[styles.metodoBoton, metodoPago === m && styles.metodoBotonActivo, metodoPago === m && COLOR_METODO[m] && { borderColor: COLOR_METODO[m], backgroundColor: colors.card }]}>
+                  <Text style={[styles.metodoTexto, metodoPago === m && styles.metodoTextoActivo, metodoPago === m && COLOR_METODO[m] && { color: COLOR_METODO[m] }]}>{m}</Text>
                 </TouchableOpacity>
               ))}
             </View>
@@ -909,6 +942,19 @@ export default function POSScreen() {
           <LicenciaScreen onActivada={() => { setModalLicencia(false); cargar() }} />
         </View>
       </Modal>
+
+      <Modal visible={modalIngreso} animationType="slide" onRequestClose={() => setModalIngreso(false)}>
+        <IngresoMercaderia onCerrar={() => setModalIngreso(false)} onGuardado={() => cargar()} />
+      </Modal>
+
+      {avisoHoja && (
+        <AvisoHoja
+          titulo={avisoHoja.titulo}
+          mensaje={avisoHoja.mensaje}
+          botones={avisoHoja.botones || [{ texto: 'Entendido', primario: true }]}
+          onCerrar={() => setAvisoHoja(null)}
+        />
+      )}
     </View>
   )
 }
@@ -924,6 +970,10 @@ const crearStyles = (tx) => ({
   tabCarritoTextoActivo: { color: colors.accent },
   tabNuevo: { paddingHorizontal: 14, paddingVertical: 12, minHeight: 44, justifyContent: 'center', borderRadius: 999, borderWidth: 1, borderColor: colors.borderStrong, borderStyle: 'dashed' },
   tabNuevoTexto: { color: colors.textMuted, fontSize: tx(13), fontWeight: '600', lineHeight: 18 },
+  filaAtajos: { flexDirection: 'row', gap: 8, paddingHorizontal: 12, paddingTop: 8 },
+  pistaTabs: { color: colors.textMuted, fontSize: tx(12), paddingHorizontal: 14, paddingTop: 2 },
+  botonAtajo: { flex: 1, minHeight: 44, justifyContent: 'center', alignItems: 'center', borderRadius: 10, borderWidth: 1, borderColor: colors.borderStrong, backgroundColor: colors.card },
+  botonAtajoTexto: { color: colors.text, fontWeight: '700', fontSize: tx(13) },
   filaBuscador: { flexDirection: 'row', alignItems: 'center', gap: 12, margin: 12 },
   buscador: { flex: 1, backgroundColor: colors.input, borderWidth: 1, borderColor: colors.border, borderRadius: 10, padding: 12, color: colors.text },
   botonEscanear: { width: 48, height: 48, alignItems: 'center', justifyContent: 'center', borderRadius: 10, borderWidth: 1, borderColor: colors.borderStrong, backgroundColor: colors.card },
@@ -959,7 +1009,7 @@ const crearStyles = (tx) => ({
   filaCarrito: { flexDirection: 'row', alignItems: 'center', paddingVertical: 6, gap: 8 },
   itemNombre: { color: colors.text, flex: 1, fontSize: tx(13) },
   controlesCantidad: { flexDirection: 'row', alignItems: 'center', gap: 8 },
-  botonCantidad: { width: 40, height: 40, borderRadius: 20, backgroundColor: colors.bg, borderWidth: 1, borderColor: colors.border, alignItems: 'center', justifyContent: 'center' },
+  botonCantidad: { width: 44, height: 44, borderRadius: 22, backgroundColor: colors.bg, borderWidth: 1, borderColor: colors.border, alignItems: 'center', justifyContent: 'center' },
   botonCantidadTexto: { color: colors.text, fontWeight: '700', fontSize: tx(18) },
   cantidadTexto: { color: colors.text, fontWeight: '700', fontSize: tx(16), minWidth: 22, textAlign: 'center' },
   itemSubtotal: { color: colors.accent, fontWeight: '700', minWidth: 70, textAlign: 'right' },
@@ -983,12 +1033,12 @@ const crearStyles = (tx) => ({
   aviso: { position: 'absolute', top: 12, left: 16, right: 16, backgroundColor: colors.primary, borderRadius: 12, paddingVertical: 12, paddingHorizontal: 16, alignItems: 'center', elevation: 4, shadowColor: '#000', shadowOpacity: 0.15, shadowRadius: 8, shadowOffset: { width: 0, height: 2 } },
   avisoTexto: { color: colors.primaryText, fontWeight: '700', fontSize: tx(15) },
   modoGranelFila: { flexDirection: 'row', gap: 8 },
-  modoGranelBoton: { flex: 1, paddingVertical: 10, borderRadius: 10, borderWidth: 1, borderColor: colors.border, alignItems: 'center' },
+  modoGranelBoton: { flex: 1, minHeight: 44, justifyContent: 'center', paddingVertical: 10, borderRadius: 10, borderWidth: 1, borderColor: colors.border, alignItems: 'center' },
   modoGranelBotonActivo: { backgroundColor: colors.accentBg, borderColor: colors.primary },
   modoGranelTexto: { color: colors.textMuted, fontWeight: '600', fontSize: tx(13) },
   modoGranelTextoActivo: { color: colors.accent },
   metodosGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
-  metodoBoton: { paddingHorizontal: 14, paddingVertical: 10, borderRadius: 10, borderWidth: 1, borderColor: colors.border },
+  metodoBoton: { paddingHorizontal: 14, minHeight: 44, justifyContent: 'center', paddingVertical: 10, borderRadius: 10, borderWidth: 1, borderColor: colors.border },
   metodoBotonActivo: { backgroundColor: colors.accentBg, borderColor: colors.primary },
   metodoTexto: { color: colors.textMuted, fontWeight: '600' },
   metodoTextoActivo: { color: colors.accent },
@@ -998,7 +1048,7 @@ const crearStyles = (tx) => ({
   textoMuted: { color: colors.textMuted, fontSize: tx(13) },
   inputPeso: { fontSize: tx(22), fontWeight: '700', textAlign: 'center', marginTop: 10 },
   pesosRapidosFila: { flexDirection: 'row', gap: 8, marginTop: 4 },
-  botonPesoRapido: { flex: 1, paddingVertical: 10, borderRadius: 10, borderWidth: 1, borderColor: colors.border, alignItems: 'center' },
+  botonPesoRapido: { flex: 1, minHeight: 44, justifyContent: 'center', paddingVertical: 10, borderRadius: 10, borderWidth: 1, borderColor: colors.border, alignItems: 'center' },
   botonPesoRapidoTexto: { color: colors.text, fontWeight: '600', fontSize: tx(13) },
   subtotalPreview: { color: colors.accent, fontWeight: '700', fontSize: tx(16), textAlign: 'center', marginTop: 4 },
   clienteFila: { padding: 10, borderRadius: 8, marginBottom: 4, backgroundColor: colors.bg, borderWidth: 1, borderColor: colors.border },

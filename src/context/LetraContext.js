@@ -6,7 +6,7 @@
 import React, { createContext, useContext, useState, useCallback } from 'react'
 import db from '../data/db'
 
-export const FACTOR_LETRA_GRANDE = 1.2
+export const FACTOR_LETRA_GRANDE = 1.3
 
 const LetraContext = createContext({ grande: false, tx: (n) => n, alternar: async () => {} })
 

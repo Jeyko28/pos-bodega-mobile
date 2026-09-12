@@ -2,6 +2,7 @@ import React, { useState } from 'react'
 import { View, Text, TextInput, TouchableOpacity, StyleSheet, ActivityIndicator } from 'react-native'
 import { KeyboardAwareScrollView } from 'react-native-keyboard-aware-scroll-view'
 import db from '../data/db'
+import CampoClave from '../components/CampoClave'
 import { colors } from '../theme/colors'
 
 export default function SetupScreen({ onCompleto }) {
@@ -46,8 +47,7 @@ export default function SetupScreen({ onCompleto }) {
           value={adminUsername} onChangeText={setAdminUsername} />
 
         <Text style={styles.label}>Contraseña</Text>
-        <TextInput style={styles.input} placeholder="••••••" placeholderTextColor={colors.placeholder} secureTextEntry
-          value={adminPassword} onChangeText={setAdminPassword} />
+        <CampoClave textoGuia="••••••" valor={adminPassword} alCambiar={setAdminPassword} />
 
         {error && <Text style={styles.error}>{error}</Text>}
 
@@ -64,7 +64,7 @@ const styles = StyleSheet.create({
   emoji: { fontSize: 48, textAlign: 'center', marginBottom: 8 },
   titulo: { fontSize: 22, fontWeight: '700', color: colors.text, textAlign: 'center', marginBottom: 4 },
   subtitulo: { fontSize: 14, color: colors.textMuted, textAlign: 'center', marginBottom: 32 },
-  label: { fontSize: 13, fontWeight: '700', color: colors.textMuted, marginBottom: 6, marginTop: 16, textTransform: 'uppercase', letterSpacing: 0.5 },
+  label: { fontSize: 13, fontWeight: '700', color: colors.textMuted, marginBottom: 6, marginTop: 16 },
   input: { backgroundColor: colors.input, borderWidth: 1, borderColor: colors.border, borderRadius: 10, padding: 14, color: colors.text, fontSize: 15 },
   error: { color: colors.danger, fontSize: 13, marginTop: 16, textAlign: 'center' },
   boton: { backgroundColor: colors.primary, borderRadius: 12, padding: 16, alignItems: 'center', marginTop: 32 },

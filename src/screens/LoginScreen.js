@@ -1,7 +1,9 @@
 import React, { useState, useEffect } from 'react'
-import { View, Text, TextInput, TouchableOpacity, StyleSheet, KeyboardAvoidingView, Platform, ActivityIndicator, Modal, ScrollView, Alert } from 'react-native'
+import { View, Text, TextInput, TouchableOpacity, StyleSheet, KeyboardAvoidingView, Platform, ActivityIndicator, Modal, ScrollView } from 'react-native'
 import AsyncStorage from '@react-native-async-storage/async-storage'
 import db from '../data/db'
+import CampoClave from '../components/CampoClave'
+import AvisoHoja from '../components/AvisoHoja'
 import { WS_VENTAS } from '../data/licencia'
 import { abrirWhatsApp } from '../utils/cobranza'
 import { colors } from '../theme/colors'
@@ -36,6 +38,7 @@ export default function LoginScreen({ onLogin }) {
   const [recNueva, setRecNueva] = useState('')
   const [recInstalacion, setRecInstalacion] = useState(null)
   const [recGuardando, setRecGuardando] = useState(false)
+  const [aviso, setAviso] = useState(null)
 
   // Huella solo si el teléfono la tiene configurada Y hay un usuario
   // recordado de una entrada anterior. Sin módulo nativo (build viejo),
@@ -89,29 +92,30 @@ export default function LoginScreen({ onLogin }) {
   }
 
   async function pedirCodigoRecupero() {
-    await abrirWhatsApp({
+    const r = await abrirWhatsApp({
       telefono: WS_VENTAS,
       mensaje: `Hola, buenas. Olvidé mi clave del POS Bodega. Mi código de instalación es ${recInstalacion} y mi usuario es ${recUsuario || '(no lo recuerdo)'}.`,
     })
+    if (!r.ok) setAviso({ titulo: 'No se pudo abrir WhatsApp', mensaje: r.error })
   }
 
   async function guardarNuevaClave() {
     if (!recNueva || recNueva.length < 4) {
-      Alert.alert('Muy corta', 'La nueva contraseña debe tener al menos 4 caracteres.')
+      setAviso({ titulo: 'Muy corta', mensaje: 'La nueva contraseña debe tener al menos 4 caracteres.' })
       return
     }
     setRecGuardando(true)
     try {
       const r = await db.restablecerPassword({ username: recUsuario, codigo: recCodigo, nueva: recNueva })
       if (!r.success) {
-        Alert.alert('No se pudo', r.error)
+        setAviso({ titulo: 'No se pudo', mensaje: r.error })
         return
       }
       setModalRecupero(false)
       setUsername(recUsuario.trim())
       setPassword('')
       setError(null)
-      Alert.alert('✓ Listo', 'Ya tienes contraseña nueva. Entra con ella (o con tu huella).')
+      setAviso({ titulo: '✓ Listo', mensaje: 'Ya tienes contraseña nueva. Entra con ella (o con tu huella).' })
     } finally {
       setRecGuardando(false)
     }
@@ -126,8 +130,7 @@ export default function LoginScreen({ onLogin }) {
 
         <TextInput style={styles.input} placeholder="Usuario" placeholderTextColor={colors.placeholder} autoCapitalize="none"
           value={username} onChangeText={setUsername} />
-        <TextInput style={styles.input} placeholder="Contraseña" placeholderTextColor={colors.placeholder} secureTextEntry
-          value={password} onChangeText={setPassword} />
+        <CampoClave textoGuia="Contraseña" valor={password} alCambiar={setPassword} />
 
         {error && <Text style={styles.error}>{error}</Text>}
 
@@ -150,7 +153,7 @@ export default function LoginScreen({ onLogin }) {
         <ScrollView style={styles.modalRoot} contentContainerStyle={styles.modalScroll} keyboardShouldPersistTaps="handled">
           <Text style={styles.modalTitulo}>Recuperar contraseña</Text>
           <Text style={styles.modalAyuda}>
-            Pide tu código por WhatsApp y escríbelo acá con tu clave nueva. Funciona sin internet.
+            Pide tu código por WhatsApp (necesitas internet un momento) y escríbelo acá con tu clave nueva. Después entras sin internet.
           </Text>
 
           <Text style={styles.etiqueta}>Tu código de instalación</Text>
@@ -167,8 +170,7 @@ export default function LoginScreen({ onLogin }) {
             autoCapitalize="characters" autoCorrect={false}
             value={recCodigo} onChangeText={setRecCodigo} />
           <Text style={styles.etiqueta}>Contraseña nueva</Text>
-          <TextInput style={styles.input} placeholder="Mínimo 4 caracteres" placeholderTextColor={colors.placeholder} secureTextEntry
-            value={recNueva} onChangeText={setRecNueva} />
+          <CampoClave textoGuia="Mínimo 4 caracteres" valor={recNueva} alCambiar={setRecNueva} />
 
           <TouchableOpacity style={styles.boton} onPress={guardarNuevaClave} disabled={recGuardando}>
             {recGuardando
@@ -179,6 +181,14 @@ export default function LoginScreen({ onLogin }) {
             <Text style={styles.enlaceTexto}>Volver</Text>
           </TouchableOpacity>
         </ScrollView>
+        {aviso && (
+          <AvisoHoja
+            titulo={aviso.titulo}
+            mensaje={aviso.mensaje}
+            botones={aviso.botones || [{ texto: 'Entendido', primario: true }]}
+            onCerrar={() => setAviso(null)}
+          />
+        )}
       </Modal>
     </KeyboardAvoidingView>
   )
@@ -202,7 +212,7 @@ const styles = StyleSheet.create({
   modalScroll: { padding: 24, paddingTop: 64, gap: 10, paddingBottom: 40 },
   modalTitulo: { fontSize: 22, fontWeight: '800', color: colors.text, textAlign: 'center' },
   modalAyuda: { fontSize: 14, color: colors.textMuted, textAlign: 'center', lineHeight: 20, marginBottom: 8 },
-  etiqueta: { color: colors.textMuted, fontSize: 11, fontWeight: '700', textTransform: 'uppercase', letterSpacing: 0.5, marginTop: 8 },
+  etiqueta: { color: colors.textMuted, fontSize: 11, fontWeight: '700', marginTop: 8 },
   instalacionId: { color: colors.text, fontSize: 24, fontWeight: '800', textAlign: 'center', letterSpacing: 2 },
   botonWs: { backgroundColor: '#25D366', borderRadius: 12, padding: 16, alignItems: 'center' },
   botonWsTexto: { color: '#fff', fontWeight: '700', fontSize: 16 },

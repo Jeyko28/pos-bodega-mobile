@@ -1,11 +1,12 @@
 import React, { useState, useCallback } from 'react'
-import { View, Text, TextInput, FlatList, StyleSheet, TouchableOpacity, Modal, ScrollView, Pressable, Alert } from 'react-native'
+import { View, Text, TextInput, FlatList, StyleSheet, TouchableOpacity, Modal, ScrollView, Pressable } from 'react-native'
 import { useFocusEffect } from '@react-navigation/native'
 import db, { MOTIVOS_SALIDA } from '../data/db'
 import { colors } from '../theme/colors'
 import { chips } from '../theme/chips'
 import { compartirTicket } from '../utils/ticket'
 import { usePieDeHoja } from '../utils/teclado'
+import AvisoHoja from '../components/AvisoHoja'
 import { useSesion } from '../context/SesionContext'
 import { useLetra } from '../context/LetraContext'
 
@@ -13,6 +14,7 @@ const fmt = (n) => `S/ ${Number(n).toFixed(2)}`
 const hora = (iso) => new Date(iso).toLocaleTimeString('es-PE', { hour: '2-digit', minute: '2-digit' })
 const FONDOS_RAPIDOS = [0, 20, 50, 100]
 const METODOS_COBRO = ['Efectivo', 'Yape', 'Plin']
+const COLOR_METODO = { Yape: '#7B2D8B', Plin: '#0284C7' }
 const ICONO = { Efectivo: '💵', Yape: '📱', Plin: '📲', Fiado: '📋' }
 const PERIODOS = [
   { id: 'hoy', label: 'Hoy' },
@@ -29,6 +31,10 @@ export default function HistorialScreen() {
   const [resumen, setResumen] = useState({ total_ventas: 0, ingresos: 0 })
   const [ganancia, setGanancia] = useState(null)
   const [periodo, setPeriodo] = useState('hoy')
+  const [aviso, setAviso] = useState(null)
+  // Aviso a nivel pantalla: el de anular con éxito se muestra DESPUÉS de
+  // cerrar el modal del detalle (su overlay muere con él).
+  const [avisoRaiz, setAvisoRaiz] = useState(null)
   const [metodoFiltro, setMetodoFiltro] = useState(null)
   const [ventaSel, setVentaSel] = useState(null)
   const [compartiendo, setCompartiendo] = useState(false)
@@ -87,7 +93,7 @@ export default function HistorialScreen() {
     setGuardandoCaja(true)
     const r = await db.registrarSalidaCaja({ monto: salidaMonto, motivo: salidaMotivo, usuarioId: usuario?.id })
     setGuardandoCaja(false)
-    if (!r.success) { Alert.alert('No se pudo anotar', r.error); return }
+    if (!r.success) { setAviso({ titulo: 'No se pudo anotar', mensaje: r.error }); return }
     setCaja(db.getEstadoCaja())
     cerrarVistaCaja()
   }
@@ -96,7 +102,7 @@ export default function HistorialScreen() {
     setGuardandoCaja(true)
     const r = await db.abrirCaja({ fondoInicial: fondoInicial || 0, usuarioId: usuario?.id })
     setGuardandoCaja(false)
-    if (!r.success) { Alert.alert('No se pudo abrir', r.error); return }
+    if (!r.success) { setAviso({ titulo: 'No se pudo abrir', mensaje: r.error }); return }
     setCaja(db.getEstadoCaja())
     cerrarVistaCaja()
   }
@@ -110,7 +116,7 @@ export default function HistorialScreen() {
     setGuardandoCaja(true)
     const r = await db.cerrarCaja({ efectivoContado, nota: notaCierre, usuarioId: usuario?.id })
     setGuardandoCaja(false)
-    if (!r.success) { Alert.alert('No se pudo cerrar', r.error); return }
+    if (!r.success) { setAviso({ titulo: 'No se pudo cerrar', mensaje: r.error }); return }
     setCaja(db.getEstadoCaja())
     cerrarVistaCaja()
     const detalle = r.diferencia === 0
@@ -118,7 +124,7 @@ export default function HistorialScreen() {
       : r.diferencia > 0
         ? `Sobran ${fmt(r.diferencia)} respecto a lo esperado.`
         : `Faltan ${fmt(Math.abs(r.diferencia))} respecto a lo esperado.`
-    Alert.alert('✓ Caja cerrada', `${detalle}\n\nEsperado ${fmt(r.esperado)} · contado ${fmt(r.contado)}`)
+    setAviso({ titulo: '✓ Caja cerrada', mensaje: `${detalle}\n\nEsperado ${fmt(r.esperado)} · contado ${fmt(r.contado)}` })
   }
 
   // Solo tiene sentido corregir un cobro que entró: un fiado no se cobró
@@ -133,32 +139,32 @@ export default function HistorialScreen() {
 
   async function corregirMetodo(metodo) {
     const r = await db.cambiarMetodoPago(ventaSel.id, metodo)
-    if (!r.success) { Alert.alert('No se pudo corregir', r.error); return }
+    if (!r.success) { setAviso({ titulo: 'No se pudo corregir', mensaje: r.error }); return }
     setVentaSel(v => ({ ...v, metodo_pago: metodo }))
     recargar()
   }
 
   function confirmarAnular() {
-    Alert.alert(
-      '¿Anular esta venta?',
-      `Se devuelve el stock de los productos y la venta deja de contar en los totales y en la caja.\n\n${
+    setAviso({
+      titulo: '¿Anular esta venta?',
+      mensaje: `Se devuelve el stock de los productos y la venta deja de contar en los totales y en la caja.\n\n${
         ventaSel.es_fiado ? 'También se borra la deuda que generó.\n\n' : ''
       }La venta queda a la vista, marcada como anulada.`,
-      [
-        { text: 'Cancelar', style: 'cancel' },
+      botones: [
+        { texto: 'Cancelar' },
         {
-          text: 'Anular',
-          style: 'destructive',
+          texto: 'Anular', peligro: true,
           onPress: async () => {
+            setAviso(null)
             const r = await db.anularVenta(ventaSel.id, usuario?.id)
-            if (!r.success) { Alert.alert('No se pudo anular', r.error); return }
+            if (!r.success) { setAviso({ titulo: 'No se pudo anular', mensaje: r.error }); return }
             setVentaSel(null)
             recargar()
-            Alert.alert('✓ Venta anulada', 'El stock volvió a como estaba y los totales ya no la cuentan.')
+            setAvisoRaiz({ titulo: '✓ Venta anulada', mensaje: 'El stock volvió a como estaba y los totales ya no la cuentan.' })
           },
         },
       ],
-    )
+    })
   }
 
   async function handleCompartir() {
@@ -166,7 +172,7 @@ export default function HistorialScreen() {
     try {
       await compartirTicket(ventaSel, db.getConfig())
     } catch (e) {
-      Alert.alert('Error', 'No se pudo generar el ticket.')
+      setAviso({ titulo: 'Error', mensaje: 'No se pudo generar el ticket.' })
     }
     setCompartiendo(false)
   }
@@ -332,6 +338,14 @@ export default function HistorialScreen() {
               </TouchableOpacity>
             </View>
           </ScrollView>
+          {aviso && (
+            <AvisoHoja
+              titulo={aviso.titulo}
+              mensaje={aviso.mensaje}
+              botones={aviso.botones || [{ texto: 'Entendido', primario: true }]}
+              onCerrar={() => setAviso(null)}
+            />
+          )}
         </View>
       </Modal>
 
@@ -368,6 +382,14 @@ export default function HistorialScreen() {
               </TouchableOpacity>
             </View>
           </ScrollView>
+          {aviso && (
+            <AvisoHoja
+              titulo={aviso.titulo}
+              mensaje={aviso.mensaje}
+              botones={aviso.botones || [{ texto: 'Entendido', primario: true }]}
+              onCerrar={() => setAviso(null)}
+            />
+          )}
         </View>
       </Modal>
 
@@ -441,24 +463,32 @@ export default function HistorialScreen() {
                   />
                 )}
 
-                <View style={styles.filaBotones}>
-                  <TouchableOpacity style={styles.botonGhost} onPress={cerrarVistaCaja}>
-                    <Text style={styles.botonGhostTexto}>Todavía no</Text>
-                  </TouchableOpacity>
-                  <TouchableOpacity
-                    style={[styles.botonPrimario, diferencia === null && styles.botonDeshabilitado]}
-                    onPress={confirmarCierre}
-                    disabled={diferencia === null || guardandoCaja}
-                  >
-                    <Text style={styles.botonPrimarioTexto}>{guardandoCaja ? 'Cerrando...' : 'Cerrar caja'}</Text>
-                  </TouchableOpacity>
-                </View>
                 {diferencia === null && (
                   <Text style={styles.motivoBloqueo}>Cuenta el efectivo del cajón y escríbelo para cerrar.</Text>
                 )}
               </>
             )}
           </ScrollView>
+          <View style={[styles.pieFicha, { paddingBottom: 12 + espacioAbajo }]}>
+            <TouchableOpacity style={styles.botonGhost} onPress={cerrarVistaCaja}>
+              <Text style={styles.botonGhostTexto}>Volver</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[styles.botonPrimario, diferencia === null && styles.botonDeshabilitado]}
+              onPress={confirmarCierre}
+              disabled={diferencia === null || guardandoCaja}
+            >
+              <Text style={styles.botonPrimarioTexto}>{guardandoCaja ? 'Cerrando...' : 'Cerrar caja'}</Text>
+            </TouchableOpacity>
+          </View>
+          {aviso && (
+            <AvisoHoja
+              titulo={aviso.titulo}
+              mensaje={aviso.mensaje}
+              botones={aviso.botones || [{ texto: 'Entendido', primario: true }]}
+              onCerrar={() => setAviso(null)}
+            />
+          )}
         </View>
       </Modal>
 
@@ -552,9 +582,9 @@ export default function HistorialScreen() {
                         <TouchableOpacity
                           key={m}
                           onPress={() => corregirMetodo(m)}
-                          style={[styles.metodoChip, ventaSel.metodo_pago === m && styles.metodoChipActivo]}
+                          style={[styles.metodoChip, ventaSel.metodo_pago === m && styles.metodoChipActivo, ventaSel.metodo_pago === m && COLOR_METODO[m] && { borderColor: COLOR_METODO[m] }]}
                         >
-                          <Text style={[styles.metodoChipTexto, ventaSel.metodo_pago === m && styles.metodoChipTextoActivo]}>
+                          <Text style={[styles.metodoChipTexto, ventaSel.metodo_pago === m && styles.metodoChipTextoActivo, ventaSel.metodo_pago === m && COLOR_METODO[m] && { color: COLOR_METODO[m] }]}>
                             {ICONO[m]} {m}
                           </Text>
                         </TouchableOpacity>
@@ -580,8 +610,24 @@ export default function HistorialScreen() {
               </>
             )}
           </View>
+          {aviso && (
+            <AvisoHoja
+              titulo={aviso.titulo}
+              mensaje={aviso.mensaje}
+              botones={aviso.botones || [{ texto: 'Entendido', primario: true }]}
+              onCerrar={() => setAviso(null)}
+            />
+          )}
         </View>
       </Modal>
+      {avisoRaiz && (
+        <AvisoHoja
+          titulo={avisoRaiz.titulo}
+          mensaje={avisoRaiz.mensaje}
+          botones={[{ texto: 'Entendido', primario: true }]}
+          onCerrar={() => setAvisoRaiz(null)}
+        />
+      )}
     </View>
   )
 }
@@ -601,7 +647,7 @@ const crearStyles = (tx) => ({
   cajaMonto: { color: colors.accent, fontWeight: '700' },
   cajaBotones: { flexDirection: 'row', gap: 10, marginTop: 10 },
 
-  etiqueta: { color: colors.textMuted, fontSize: tx(13), fontWeight: '700', textTransform: 'uppercase', letterSpacing: 0.5, marginTop: 14, marginBottom: 6 },
+  etiqueta: { color: colors.textMuted, fontSize: tx(13), fontWeight: '700', marginTop: 14, marginBottom: 6 },
   input: { backgroundColor: colors.input, borderWidth: 1, borderColor: colors.border, borderRadius: 10, padding: 14, color: colors.text, fontSize: tx(15), marginTop: 8 },
   inputNota: { minHeight: 70, textAlignVertical: 'top' },
   atajosFondo: { flexDirection: 'row', gap: 8, marginTop: 12 },
@@ -644,7 +690,7 @@ const crearStyles = (tx) => ({
   filaGanancia: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
   gananciaLabel: { color: colors.textMuted, fontSize: tx(13), fontWeight: '600' },
   gananciaValor: { color: colors.accent, fontWeight: '800', fontSize: tx(22) },
-  gananciaAviso: { color: colors.textMuted, fontSize: tx(13), lineHeight: 16, marginTop: 6 },
+  gananciaAviso: { color: colors.textoAyuda, fontSize: tx(14), lineHeight: 18, marginTop: 6 },
   resumenLabel: { color: colors.textMuted, fontSize: tx(13), marginTop: 4 },
   fila: { flexDirection: 'row', alignItems: 'center', backgroundColor: colors.card, borderRadius: 10, padding: 12, marginBottom: 8, borderWidth: 1, borderColor: colors.border },
   venta: { color: colors.text, fontWeight: '600', fontSize: tx(13) },
@@ -666,6 +712,7 @@ const crearStyles = (tx) => ({
   totalGrandeLabel: { color: colors.text, fontWeight: '900', fontSize: tx(18) },
   totalGrande: { color: colors.accent, fontWeight: '900', fontSize: tx(18) },
   filaBotones: { flexDirection: 'row', gap: 10, marginTop: 16 },
+  pieFicha: { flexDirection: 'row', gap: 10, padding: 16, paddingTop: 12, backgroundColor: colors.card, borderTopWidth: 1, borderColor: colors.border },
   botonGhost: { flex: 1, padding: 14, borderRadius: 10, borderWidth: 1, borderColor: colors.border, alignItems: 'center' },
   botonGhostTexto: { color: colors.textMuted, fontWeight: '600' },
   botonPrimario: { flex: 1, padding: 14, borderRadius: 10, backgroundColor: colors.primary, alignItems: 'center' },

@@ -1,9 +1,12 @@
 import React, { useState } from 'react'
-import { View, Text, TextInput, TouchableOpacity, Modal, ScrollView, Pressable, StyleSheet, Alert, Keyboard } from 'react-native'
+import { View, Text, TextInput, TouchableOpacity, Modal, ScrollView, Pressable, StyleSheet, Keyboard } from 'react-native'
 import { Ionicons } from '@expo/vector-icons'
 import db from '../data/db'
 import BotonHeader from './BotonHeader'
+import CampoClave from './CampoClave'
+import AvisoHoja from './AvisoHoja'
 import { useSesion } from '../context/SesionContext'
+import { useLetra } from '../context/LetraContext'
 import { useNavigation } from '@react-navigation/native'
 import { usePieDeHoja } from '../utils/teclado'
 import { colors } from '../theme/colors'
@@ -15,6 +18,7 @@ const FORM_VACIO = { nombre: '', username: '', password: '', rol: 'cajero' }
 // dos sin responder.
 export default function PanelUsuario() {
   const { usuario, handleLogout } = useSesion()
+  const { grande, alternar } = useLetra()
   const navigation = useNavigation()
   const { alturaTeclado, espacioAbajo } = usePieDeHoja()
   const [abierto, setAbierto] = useState(false)
@@ -27,6 +31,7 @@ export default function PanelUsuario() {
 
   const [usuarios, setUsuarios] = useState([])
   const [form, setForm] = useState(FORM_VACIO)
+  const [aviso, setAviso] = useState(null)
 
   const esAdmin = usuario?.rol === 'admin'
 
@@ -49,31 +54,31 @@ export default function PanelUsuario() {
 
   async function guardarPassword() {
     if (passNueva !== passRepetida) {
-      Alert.alert('No coinciden', 'La nueva contraseña y su repetición no son iguales.')
+      setAviso({ titulo: 'No coinciden', mensaje: 'La nueva contraseña y su repetición no son iguales.' })
       return
     }
     setGuardando(true)
     const r = await db.cambiarPassword({ usuarioId: usuario.id, actual: passActual, nueva: passNueva })
     setGuardando(false)
     if (!r.success) {
-      Alert.alert('No se pudo cambiar', r.error)
+      setAviso({ titulo: 'No se pudo cambiar', mensaje: r.error })
       return
     }
     setPassActual(''); setPassNueva(''); setPassRepetida('')
     setVista('menu')
-    Alert.alert('✓ Listo', 'Tu contraseña quedó actualizada.')
+    setAviso({ titulo: '✓ Listo', mensaje: 'Tu contraseña quedó actualizada.' })
   }
 
   async function guardarUsuario() {
     if (!form.nombre.trim() || !form.username.trim() || form.password.length < 4) {
-      Alert.alert('Faltan datos', 'Completa nombre, usuario y una contraseña de al menos 4 caracteres.')
+      setAviso({ titulo: 'Faltan datos', mensaje: 'Completa nombre, usuario y una contraseña de al menos 4 caracteres.' })
       return
     }
     setGuardando(true)
     const r = await db.addUsuario(form)
     setGuardando(false)
     if (!r.success) {
-      Alert.alert('No se pudo crear', r.error)
+      setAviso({ titulo: 'No se pudo crear', mensaje: r.error })
       return
     }
     setForm(FORM_VACIO)
@@ -84,7 +89,7 @@ export default function PanelUsuario() {
   async function alternarActivo(u) {
     const r = await db.setUsuarioActivo(u.id, !u.activo)
     if (!r.success) {
-      Alert.alert('No se puede', r.error)
+      setAviso({ titulo: 'No se puede', mensaje: r.error })
       return
     }
     setUsuarios(db.getUsuarios())
@@ -113,6 +118,14 @@ export default function PanelUsuario() {
                 <TouchableOpacity style={styles.opcion} onPress={() => setVista('password')}>
                   <Ionicons name="key-outline" size={20} color={colors.text} />
                   <Text style={styles.opcionTexto}>Cambiar mi contraseña</Text>
+                  <Ionicons name="chevron-forward" size={18} color={colors.textMuted} />
+                </TouchableOpacity>
+
+                {/* Letra grande al alcance de todos (el cajero no entra a
+                    Ajustes, pero sus ojos cansan igual). */}
+                <TouchableOpacity style={styles.opcion} onPress={alternar}>
+                  <Ionicons name="text-outline" size={20} color={colors.text} />
+                  <Text style={styles.opcionTexto}>Letra grande: {grande ? 'activada' : 'apagada'}</Text>
                   <Ionicons name="chevron-forward" size={18} color={colors.textMuted} />
                 </TouchableOpacity>
 
@@ -146,12 +159,9 @@ export default function PanelUsuario() {
             {vista === 'password' && (
               <>
                 <Text style={styles.titulo}>Cambiar mi contraseña</Text>
-                <TextInput style={styles.input} placeholder="Contraseña actual" placeholderTextColor={colors.placeholder}
-                  secureTextEntry value={passActual} onChangeText={setPassActual} />
-                <TextInput style={styles.input} placeholder="Nueva contraseña" placeholderTextColor={colors.placeholder}
-                  secureTextEntry value={passNueva} onChangeText={setPassNueva} />
-                <TextInput style={styles.input} placeholder="Repite la nueva" placeholderTextColor={colors.placeholder}
-                  secureTextEntry value={passRepetida} onChangeText={setPassRepetida} />
+                <CampoClave textoGuia="Contraseña actual" valor={passActual} alCambiar={setPassActual} />
+                <CampoClave textoGuia="Nueva contraseña" valor={passNueva} alCambiar={setPassNueva} />
+                <CampoClave textoGuia="Repite la nueva" valor={passRepetida} alCambiar={setPassRepetida} />
                 <View style={styles.filaBotones}>
                   <TouchableOpacity style={styles.botonGhost} onPress={() => setVista('menu')}>
                     <Text style={styles.botonGhostTexto}>Cancelar</Text>
@@ -232,6 +242,14 @@ export default function PanelUsuario() {
               </>
             )}
           </ScrollView>
+          {aviso && (
+            <AvisoHoja
+              titulo={aviso.titulo}
+              mensaje={aviso.mensaje}
+              botones={aviso.botones || [{ texto: 'Entendido', primario: true }]}
+              onCerrar={() => setAviso(null)}
+            />
+          )}
         </View>
       </Modal>
     </>

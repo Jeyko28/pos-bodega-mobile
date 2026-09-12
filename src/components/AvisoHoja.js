@@ -4,6 +4,8 @@
 // pantalla u hoja que la llama, porque dos <Modal> nativos a la vez rompen
 // en iOS. Uso:
 //   {aviso && <AvisoHoja titulo="..." mensaje="..." botones={[{ texto: 'Listo', primario: true }]} onCerrar={...} />}
+// Botones: { texto, onPress?, primario?, peligro? }. Con 3+ botones van en
+// columna para que quepan los dedos.
 // El fondo es blur real (expo-blur) con caída a sombra si el build aún no
 // trae el módulo nativo (igual que la huella: require perezoso).
 import React from 'react'
@@ -32,14 +34,14 @@ export default function AvisoHoja({ titulo, mensaje, botones = [{ texto: 'Listo'
       <View style={styles.caja}>
         <Text style={styles.titulo}>{titulo}</Text>
         {!!mensaje && <Text style={styles.mensaje}>{mensaje}</Text>}
-        <View style={styles.filaBotones}>
+        <View style={[styles.filaBotones, botones.length > 2 && styles.filaBotonesColumna]}>
           {botones.map((b, i) => (
             <TouchableOpacity
               key={i}
-              style={[styles.boton, b.primario ? styles.botonPrimario : styles.botonGhost]}
+              style={[styles.boton, b.primario ? styles.botonPrimario : b.peligro ? styles.botonPeligro : styles.botonGhost]}
               onPress={b.onPress || onCerrar}
             >
-              <Text style={b.primario ? styles.botonPrimarioTexto : styles.botonGhostTexto}>{b.texto}</Text>
+              <Text style={b.primario || b.peligro ? styles.botonPrimarioTexto : styles.botonGhostTexto}>{b.texto}</Text>
             </TouchableOpacity>
           ))}
         </View>
@@ -57,8 +59,10 @@ const styles = StyleSheet.create({
   titulo: { color: colors.text, fontSize: 18, fontWeight: '800', textAlign: 'center' },
   mensaje: { color: colors.textMuted, fontSize: 14, lineHeight: 20, textAlign: 'center' },
   filaBotones: { flexDirection: 'row', gap: 10, marginTop: 6 },
+  filaBotonesColumna: { flexDirection: 'column' },
   boton: { flex: 1, padding: 14, borderRadius: 10, alignItems: 'center' },
   botonPrimario: { backgroundColor: colors.primary },
+  botonPeligro: { backgroundColor: colors.danger },
   botonPrimarioTexto: { color: '#fff', fontWeight: '700', fontSize: 16 },
   botonGhost: { borderWidth: 1, borderColor: colors.border },
   botonGhostTexto: { color: colors.textMuted, fontWeight: '600', fontSize: 16 },

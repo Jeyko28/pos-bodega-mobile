@@ -1,5 +1,5 @@
 import React, { useState, useCallback } from 'react'
-import { View, Text, TextInput, TouchableOpacity, FlatList, StyleSheet, Modal, ScrollView, Pressable, Alert, Linking, Keyboard } from 'react-native'
+import { View, Text, TextInput, TouchableOpacity, FlatList, StyleSheet, Modal, ScrollView, Pressable, Linking, Keyboard } from 'react-native'
 import { useFocusEffect } from '@react-navigation/native'
 import db from '../data/db'
 import BarraBusqueda from '../components/BarraBusqueda'
@@ -14,6 +14,7 @@ import { useLetra } from '../context/LetraContext'
 const fmt = (n) => `S/ ${Number(n).toFixed(2)}`
 const METODOS = ['Efectivo', 'Yape', 'Plin']
 const ICONO_METODO = { Efectivo: '💵', Yape: '📱', Plin: '📲' }
+const COLOR_METODO = { Yape: '#7B2D8B', Plin: '#0284C7' }
 // Los mismos billetes con los que paga la gente en el mostrador.
 const BILLETES = [2, 5, 10, 20, 50, 100, 200]
 
@@ -73,7 +74,7 @@ export default function ClientesScreen() {
     try {
       await Linking.openURL(`tel:${numero}`)
     } catch {
-      Alert.alert('No se pudo llamar', 'Revisa que el número sea correcto.')
+      setAvisoListo({ titulo: 'No se pudo llamar', mensaje: 'Revisa que el número sea correcto.' })
     }
   }
 
@@ -107,8 +108,9 @@ export default function ClientesScreen() {
   async function enviarCobranza() {
     // El número que vale es el que está escrito en pantalla, no el que estaba
     // guardado: si el dueño acaba de tipearlo, tocar el botón debe funcionar.
-    const enviado = await abrirWhatsApp({ telefono: telefonoEdit, mensaje: borradorMensaje })
-    if (enviado) setBorradorMensaje(null)
+    const r = await abrirWhatsApp({ telefono: telefonoEdit, mensaje: borradorMensaje })
+    if (r.ok) setBorradorMensaje(null)
+    else setAvisoListo({ titulo: 'No se pudo abrir WhatsApp', mensaje: r.error })
   }
 
   // Solo informativo: a la caja entra el abono aplicado, porque el vuelto sale
@@ -126,7 +128,7 @@ export default function ClientesScreen() {
       usuarioId: usuario?.id,
     })
     setAbonando(false)
-    if (!r.success) { Alert.alert('No se pudo abonar', r.error); return }
+    if (!r.success) { setAvisoListo({ titulo: 'No se pudo abonar', mensaje: r.error }); return }
 
     setMontoAbono('')
     setRecibido('')
@@ -221,6 +223,9 @@ export default function ClientesScreen() {
                   </Text>
                 </TouchableOpacity>
               )}
+              {deudaTotal > 0 && borradorMensaje === null && !telefonoEdit.trim() && (
+                <Text style={styles.sinTelefonoAviso}>Escribe su teléfono arriba para recordarle por WhatsApp.</Text>
+              )}
 
               {borradorMensaje !== null && (
                 <>
@@ -262,8 +267,8 @@ export default function ClientesScreen() {
                 <View style={styles.metodoChipsFila}>
                   {METODOS.map(m => (
                     <TouchableOpacity key={m} onPress={() => setMetodoAbono(m)}
-                      style={[styles.metodoChip, metodoAbono === m && styles.metodoChipActivo]}>
-                      <Text style={[styles.metodoChipTexto, metodoAbono === m && styles.metodoChipTextoActivo]}>
+                      style={[styles.metodoChip, metodoAbono === m && styles.metodoChipActivo, metodoAbono === m && COLOR_METODO[m] && { borderColor: COLOR_METODO[m] }]}>
+                      <Text style={[styles.metodoChipTexto, metodoAbono === m && styles.metodoChipTextoActivo, metodoAbono === m && COLOR_METODO[m] && { color: COLOR_METODO[m] }]}>
                         {ICONO_METODO[m]} {m}
                       </Text>
                     </TouchableOpacity>
@@ -273,7 +278,7 @@ export default function ClientesScreen() {
                 <View style={styles.fiadoPago}>
                   <TextInput
                     style={[styles.input, { flex: 1 }]}
-                    placeholder="¿Cuánto te abona?"
+                    placeholder="¿Cuánto abona a su deuda?"
                     placeholderTextColor={colors.placeholder}
                     keyboardType="decimal-pad"
                     value={montoAbono}
@@ -305,7 +310,7 @@ export default function ClientesScreen() {
                     </View>
                     <TextInput
                       style={styles.input}
-                      placeholder="¿Con cuánto te paga? (opcional)"
+                      placeholder="¿Con qué billete paga? (para el vuelto)"
                       placeholderTextColor={colors.placeholder}
                       keyboardType="decimal-pad"
                       value={recibido}
@@ -339,8 +344,10 @@ export default function ClientesScreen() {
                 ))
               )}
             </View>
-            <TouchableOpacity style={styles.botonGhost} onPress={cerrarDetalle}><Text style={styles.botonGhostTexto}>Cerrar</Text></TouchableOpacity>
           </ScrollView>
+          <View style={[styles.pieFicha, { paddingBottom: 12 + espacioAbajo }]}>
+            <TouchableOpacity style={styles.botonGhost} onPress={cerrarDetalle}><Text style={styles.botonGhostTexto}>Cerrar</Text></TouchableOpacity>
+          </View>
           {avisoListo && (
             <AvisoHoja
               titulo={avisoListo.titulo}
@@ -382,14 +389,16 @@ const crearStyles = (tx) => ({
   filaBotones: { flexDirection: 'row', gap: 10, marginTop: 8 },
   botonGhost: { flex: 1, padding: 14, borderRadius: 10, borderWidth: 1, borderColor: colors.border, alignItems: 'center' },
   botonGhostTexto: { color: colors.textMuted, fontWeight: '600' },
+  pieFicha: { flexDirection: 'row', gap: 10, padding: 16, paddingTop: 12, backgroundColor: colors.card, borderTopWidth: 1, borderTopColor: colors.border },
   botonPrimario: { flex: 1, padding: 14, borderRadius: 10, backgroundColor: colors.primary, alignItems: 'center' },
   botonPrimarioTexto: { color: colors.primaryText, fontWeight: '700' },
   botonGuardarTel: { paddingHorizontal: 16, justifyContent: 'center', borderRadius: 10, backgroundColor: colors.primary },
   botonGuardarTelTexto: { color: colors.primaryText, fontWeight: '700', fontSize: tx(13) },
   telefonoGuardado: { color: colors.accent, fontSize: tx(13), fontWeight: '600' },
+  sinTelefonoAviso: { color: colors.textMuted, fontSize: tx(13), textAlign: 'center', marginTop: 6 },
   botonLlamar: { borderWidth: 1, borderColor: colors.border, borderRadius: 10, padding: 14, alignItems: 'center', marginTop: 8, backgroundColor: colors.card },
   botonLlamarTexto: { color: colors.accent, fontWeight: '700', fontSize: tx(14) },
-  etiquetaMensaje: { color: colors.textMuted, fontSize: tx(13), fontWeight: '700', textTransform: 'uppercase', letterSpacing: 0.5 },
+  etiquetaMensaje: { color: colors.textMuted, fontSize: tx(13), fontWeight: '700' },
   mensajeInput: { minHeight: 92, textAlignVertical: 'top' },
   bloqueCobranza: { gap: 8, paddingBottom: 12, marginBottom: 4, borderBottomWidth: 1, borderBottomColor: colors.border },
   filaTelefono: { flexDirection: 'row', gap: 8 },
@@ -420,6 +429,6 @@ const crearStyles = (tx) => ({
   vueltoOk: { color: colors.accent, fontWeight: '800', fontSize: tx(15), marginTop: 6 },
   vueltoFalta: { color: colors.danger, fontWeight: '800', fontSize: tx(15), marginTop: 6 },
   pagarTodo: { color: colors.accent, fontWeight: '700', fontSize: tx(13), textAlign: 'center', paddingVertical: 4 },
-  subtituloHistorial: { color: colors.textMuted, fontSize: tx(13), fontWeight: '700', textTransform: 'uppercase', letterSpacing: 0.5, marginTop: 16, marginBottom: 4 },
+  subtituloHistorial: { color: colors.textMuted, fontSize: tx(13), fontWeight: '700', marginTop: 16, marginBottom: 4 },
   botonPagarTexto: { color: colors.primaryText, fontWeight: '700', fontSize: tx(13) },
 })

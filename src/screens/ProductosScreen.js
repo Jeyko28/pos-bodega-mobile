@@ -1,5 +1,5 @@
 import React, { useState, useCallback } from 'react'
-import { View, Text, TextInput, TouchableOpacity, FlatList, StyleSheet, Modal, Alert, ScrollView, Pressable, Keyboard } from 'react-native'
+import { View, Text, TextInput, TouchableOpacity, FlatList, StyleSheet, Modal, ScrollView, Pressable, Keyboard } from 'react-native'
 import { useFocusEffect } from '@react-navigation/native'
 import db from '../data/db'
 import { colors } from '../theme/colors'
@@ -12,6 +12,7 @@ import { CATEGORIAS_BASE } from '../data/categorias'
 import { usePieDeHoja } from '../utils/teclado'
 import { chips } from '../theme/chips'
 import { coincide } from '../utils/texto'
+import AvisoHoja from '../components/AvisoHoja'
 import { PRESETS_BULTO, sugerirBulto } from '../data/bultos'
 import { useLetra } from '../context/LetraContext'
 
@@ -53,6 +54,7 @@ export default function ProductosScreen() {
   const [agregandoCategoria, setAgregandoCategoria] = useState(false)
   const [nuevaCategoriaTexto, setNuevaCategoriaTexto] = useState('')
   const [soloBajoStock, setSoloBajoStock] = useState(false)
+  const [aviso, setAviso] = useState(null)
   const [umbral, setUmbral] = useState(5)
 
   const CATEGORIAS = [...CATEGORIAS_BASE, ...categoriasCustom]
@@ -121,10 +123,14 @@ export default function ProductosScreen() {
   }
 
   function eliminar(p) {
-    Alert.alert('Eliminar producto', `¿Eliminar "${p.nombre}"?`, [
-      { text: 'Cancelar', style: 'cancel' },
-      { text: 'Eliminar', style: 'destructive', onPress: async () => { await db.deleteProducto(p.id); setProductos(db.getProductos()) } },
-    ])
+    setAviso({
+      titulo: 'Eliminar producto',
+      mensaje: `"${p.nombre}" ya no aparecerá para vender (su historial se queda).\n\nPista: esta pantalla se abre manteniendo apretada la fila.`,
+      botones: [
+        { texto: 'Cancelar' },
+        { texto: 'Eliminar', peligro: true, onPress: async () => { setAviso(null); await db.deleteProducto(p.id); setProductos(db.getProductos()) } },
+      ],
+    })
   }
 
   const enAlerta = (p) => parseFloat(p.stock) <= umbral
@@ -323,16 +329,31 @@ export default function ProductosScreen() {
                 </Text>
               </>
             )}
-            <View style={styles.filaBotones}>
+          </ScrollView>
+          {/* Guardar y Cancelar siempre visibles: en fichas largas quedaban escondidos abajo. */}
+          <View style={[styles.pieFicha, { paddingBottom: 12 + espacioAbajo }]}>
+            {!formValido && (
+              <Text style={styles.faltaAviso}>Te falta: {[!form.nombre.trim() && 'nombre', !form.precio && 'precio', !form.categoria && 'categoría'].filter(Boolean).join(', ')}</Text>
+            )}
+            <View style={styles.filaBotonesPie}>
               <TouchableOpacity style={styles.botonGhost} onPress={() => setModal(false)}><Text style={styles.botonGhostTexto}>Cancelar</Text></TouchableOpacity>
               <TouchableOpacity style={[styles.botonPrimario, !formValido && styles.botonDeshabilitado]} onPress={guardar} disabled={!formValido}>
                 <Text style={styles.botonPrimarioTexto}>Guardar</Text>
               </TouchableOpacity>
             </View>
-          </ScrollView>
+          </View>
         </View>
         )}
       </Modal>
+
+      {aviso && (
+        <AvisoHoja
+          titulo={aviso.titulo}
+          mensaje={aviso.mensaje}
+          botones={aviso.botones || [{ texto: 'Entendido', primario: true }]}
+          onCerrar={() => setAviso(null)}
+        />
+      )}
     </View>
   )
 }
@@ -371,7 +392,7 @@ const crearStyles = (tx) => ({
   filaCodigo: { flexDirection: 'row', gap: 8, alignItems: 'center' },
   botonEscanear: { width: 46, height: 46, borderRadius: 10, backgroundColor: colors.accentBg, borderWidth: 1, borderColor: colors.primary, alignItems: 'center', justifyContent: 'center' },
   botonEscanearTexto: { fontSize: tx(20) },
-  etiquetaCategoria: { color: colors.textMuted, fontSize: tx(13), fontWeight: '700', textTransform: 'uppercase', letterSpacing: 0.5, marginTop: 4 },
+  etiquetaCategoria: { color: colors.textMuted, fontSize: tx(13), fontWeight: '700', marginTop: 4 },
   categoriaTextoNueva: { color: colors.textMuted, fontSize: tx(13), fontWeight: '600' },
   filaNuevaCategoria: { flexDirection: 'row', gap: 8, alignItems: 'center', marginTop: -2 },
   botonConfirmarCategoria: { backgroundColor: colors.primary, borderRadius: 10, paddingHorizontal: 12, height: 46, alignItems: 'center', justifyContent: 'center' },
@@ -385,6 +406,9 @@ const crearStyles = (tx) => ({
   tipoVentaTexto: { color: colors.textMuted, fontSize: tx(13), fontWeight: '600' },
   tipoVentaTextoActivo: { color: colors.accent },
   filaBotones: { flexDirection: 'row', gap: 10, marginTop: 8 },
+  filaBotonesPie: { flexDirection: 'row', gap: 10 },
+  faltaAviso: { color: colors.warning, fontSize: tx(13), fontWeight: '700', textAlign: 'center' },
+  pieFicha: { flexDirection: 'row', gap: 10, padding: 16, paddingTop: 12, backgroundColor: colors.card, borderTopWidth: 1, borderTopColor: colors.border },
   botonGhost: { flex: 1, padding: 14, borderRadius: 10, borderWidth: 1, borderColor: colors.border, alignItems: 'center' },
   botonGhostTexto: { color: colors.textMuted, fontWeight: '600' },
   botonPrimario: { flex: 1, padding: 14, borderRadius: 10, backgroundColor: colors.primary, alignItems: 'center' },

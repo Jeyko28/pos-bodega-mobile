@@ -1,9 +1,10 @@
 import React, { useState, useMemo } from 'react'
-import { View, Text, TextInput, TouchableOpacity, ScrollView, StyleSheet, Alert } from 'react-native'
+import { View, Text, TextInput, TouchableOpacity, ScrollView, StyleSheet } from 'react-native'
 import { KeyboardAwareScrollView } from 'react-native-keyboard-aware-scroll-view'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { Ionicons } from '@expo/vector-icons'
 import db from '../data/db'
+import AvisoHoja from './AvisoHoja'
 import { CATALOGO_BASE } from '../data/catalogoBase'
 import { iconoCategoria } from '../data/categorias'
 import { chips } from '../theme/chips'
@@ -20,6 +21,7 @@ export default function CatalogoBase({ onCerrar, onAgregados, onIrAIngreso }) {
   const [precios, setPrecios] = useState({})
   const [categoria, setCategoria] = useState(null)
   const [guardando, setGuardando] = useState(false)
+  const [aviso, setAviso] = useState(null)
 
   // Los que ya están cargados se muestran marcados y bloqueados, para que el
   // dueño vea de un vistazo qué le falta en vez de topárselos al guardar.
@@ -58,10 +60,14 @@ export default function CatalogoBase({ onCerrar, onAgregados, onIrAIngreso }) {
     onAgregados?.(r)
     // El alta no es el abastecer: entran en 0 y el puente lleva directo a
     // ingresar lo que hay en el estante, que es el paso que siempre faltaba.
-    Alert.alert('✓ Listo', `Se agregaron ${r.agregados} productos.${r.omitidos ? ` ${r.omitidos} ya existían.` : ''}\n\nEntraron sin stock. ¿Ingresamos lo que tienes en el estante?`, [
-      { text: 'Después', style: 'cancel', onPress: onCerrar },
-      { text: 'Ingresar mercadería', onPress: () => onIrAIngreso?.() || onCerrar() },
-    ])
+    setAviso({
+      titulo: '✓ Listo',
+      mensaje: `Se agregaron ${r.agregados} productos.${r.omitidos ? ` ${r.omitidos} ya existían.` : ''}\n\nEntraron sin stock. ¿Ingresamos lo que tienes en el estante?`,
+      botones: [
+        { texto: 'Después', onPress: onCerrar },
+        { texto: 'Ingresar mercadería', primario: true, onPress: () => { setAviso(null); onIrAIngreso?.() || onCerrar() } },
+      ],
+    })
   }
 
   return (
@@ -145,6 +151,15 @@ export default function CatalogoBase({ onCerrar, onAgregados, onIrAIngreso }) {
           </Text>
         </TouchableOpacity>
       </View>
+
+      {aviso && (
+        <AvisoHoja
+          titulo={aviso.titulo}
+          mensaje={aviso.mensaje}
+          botones={aviso.botones || [{ texto: 'Entendido', primario: true }]}
+          onCerrar={() => setAviso(null)}
+        />
+      )}
     </View>
   )
 }
@@ -168,7 +183,7 @@ const styles = StyleSheet.create({
 
   precioCaja: { flexDirection: 'row', alignItems: 'center', gap: 2, borderWidth: 1, borderColor: colors.border, borderRadius: 8, paddingHorizontal: 8, backgroundColor: colors.input },
   moneda: { color: colors.textMuted, fontSize: 13 },
-  precioInput: { width: 46, paddingVertical: 8, color: colors.text, fontSize: 14, fontWeight: '600' },
+  precioInput: { width: 64, paddingVertical: 8, color: colors.text, fontSize: 16, fontWeight: '600' },
 
   pie: { flexDirection: 'row', gap: 10, padding: 16, backgroundColor: colors.card, borderTopWidth: 1, borderTopColor: colors.border },
   botonGhost: { flex: 1, padding: 14, borderRadius: 10, borderWidth: 1, borderColor: colors.border, alignItems: 'center' },

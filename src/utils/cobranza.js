@@ -1,4 +1,4 @@
-import { Linking, Alert } from 'react-native'
+import { Linking } from 'react-native'
 
 const fmt = (n) => `S/ ${Number(n).toFixed(2)}`
 
@@ -48,17 +48,17 @@ export function aFormatoLlamada(telefono) {
   return digitos.startsWith('+') ? digitos : `+${digitos}`
 }
 export async function abrirWhatsApp({ telefono, mensaje }) {
+  // Devuelve el resultado en vez de mostrar popups: cada pantalla muestra
+  // sus avisos con su propio estilo (AvisoHoja).
   const numero = aFormatoWhatsApp(telefono)
   if (!numero) {
-    Alert.alert('Sin teléfono', 'Este cliente no tiene un número guardado. Agrégalo para poder escribirle.')
-    return false
+    return { ok: false, error: 'Este cliente no tiene un número guardado. Agrégalo para poder escribirle.' }
   }
   const url = `https://wa.me/${numero}?text=${encodeURIComponent(mensaje)}`
   try {
     await Linking.openURL(url)
-    return true
+    return { ok: true }
   } catch (e) {
-    Alert.alert('No se pudo abrir WhatsApp', 'Revisa que el número sea correcto.')
-    return false
+    return { ok: false, error: 'No se pudo abrir WhatsApp. Revisa que el número sea correcto.' }
   }
 }

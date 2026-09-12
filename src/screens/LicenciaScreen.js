@@ -3,10 +3,11 @@
 // Se usa de dos formas: reemplazando la pestaña Vender cuando la prueba
 // venció, y como hoja dentro del POS y Ajustes cuando aún hay prueba.
 import React, { useState, useEffect } from 'react'
-import { View, Text, TextInput, TouchableOpacity, StyleSheet, ScrollView, Alert, ActivityIndicator } from 'react-native'
+import { View, Text, TextInput, TouchableOpacity, StyleSheet, ScrollView, ActivityIndicator } from 'react-native'
 import * as Haptics from 'expo-haptics'
 import * as Clipboard from 'expo-clipboard'
 import db from '../data/db'
+import AvisoHoja from '../components/AvisoHoja'
 import { WS_VENTAS, mensajePedirCodigo, mensajeSoporte, extraerCodigo } from '../data/licencia'
 import { abrirWhatsApp } from '../utils/cobranza'
 import { usePieDeHoja } from '../utils/teclado'
@@ -18,6 +19,7 @@ export default function LicenciaScreen({ onActivada }) {
   const [negocio, setNegocio] = useState(() => db.getConfig()?.negocio_nombre || '')
   const [codigo, setCodigo] = useState('')
   const [activando, setActivando] = useState(false)
+  const [aviso, setAviso] = useState(null)
   const [pegadoAuto, setPegadoAuto] = useState(false)
 
   function conGuiones(crudo16) {
@@ -49,16 +51,18 @@ export default function LicenciaScreen({ onActivada }) {
 
   // El número nunca se muestra: solo un botón que abre el chat directo.
   async function pedirPorWhatsApp() {
-    await abrirWhatsApp({ telefono: WS_VENTAS, mensaje: mensajePedirCodigo({ instalacionId: estado.instalacionId, negocio }) })
+    const r = await abrirWhatsApp({ telefono: WS_VENTAS, mensaje: mensajePedirCodigo({ instalacionId: estado.instalacionId, negocio }) })
+    if (!r.ok) setAviso({ titulo: 'No se pudo abrir WhatsApp', mensaje: r.error })
   }
 
   async function hablarConSoporte() {
-    await abrirWhatsApp({ telefono: WS_VENTAS, mensaje: mensajeSoporte({ negocio }) })
+    const r = await abrirWhatsApp({ telefono: WS_VENTAS, mensaje: mensajeSoporte({ negocio }) })
+    if (!r.ok) setAviso({ titulo: 'No se pudo abrir WhatsApp', mensaje: r.error })
   }
 
   async function activar() {
     if (!codigo.trim()) {
-      Alert.alert('Falta el código', 'Escribe el código de 16 letras que te enviamos por WhatsApp.')
+      setAviso({ titulo: 'Falta el código', mensaje: 'Escribe el código de 16 letras que te enviamos por WhatsApp.' })
       return
     }
     setActivando(true)
@@ -66,16 +70,18 @@ export default function LicenciaScreen({ onActivada }) {
       const r = await db.activarLicencia(codigo)
       if (!r.success) {
         Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error)
-        Alert.alert('No se pudo activar', r.error)
+        setAviso({ titulo: 'No se pudo activar', mensaje: r.error })
         return
       }
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success)
       const nuevo = db.getEstadoLicencia()
       setEstado(nuevo)
       setCodigo('')
-      Alert.alert('✓ ¡Activado!', 'Tu POS Bodega ya es tuyo para siempre. Gracias por tu compra.', [
-        { text: 'Seguir vendiendo', onPress: () => onActivada && onActivada(nuevo) },
-      ])
+      setAviso({
+        titulo: '✓ ¡Activado!',
+        mensaje: 'Tu POS Bodega ya es tuyo para siempre. Gracias por tu compra.',
+        botones: [{ texto: 'Seguir vendiendo', primario: true, onPress: () => { setAviso(null); onActivada && onActivada(nuevo) } }],
+      })
     } finally {
       setActivando(false)
     }
@@ -95,6 +101,7 @@ export default function LicenciaScreen({ onActivada }) {
         : 'Pide tu código con tiempo: cuando llegues al día 31, las ventas se pausan hasta activar.'
 
   return (
+    <View style={{ flex: 1, backgroundColor: colors.bg }}>
     <ScrollView style={styles.root} contentContainerStyle={[styles.scroll, { paddingBottom: 24 + espacioAbajo }]} keyboardShouldPersistTaps="handled">
       <Text style={styles.titulo}>{titulo}</Text>
       <Text style={styles.bajada}>{bajada}</Text>
@@ -140,6 +147,16 @@ export default function LicenciaScreen({ onActivada }) {
         </TouchableOpacity>
       </View>
     </ScrollView>
+
+      {aviso && (
+        <AvisoHoja
+          titulo={aviso.titulo}
+          mensaje={aviso.mensaje}
+          botones={aviso.botones || [{ texto: 'Entendido', primario: true }]}
+          onCerrar={() => setAviso(null)}
+        />
+      )}
+    </View>
   )
 }
 
@@ -149,7 +166,7 @@ const styles = StyleSheet.create({
   titulo: { color: colors.text, fontSize: 22, fontWeight: '800', textAlign: 'center', marginTop: 8 },
   bajada: { color: colors.textMuted, fontSize: 14, lineHeight: 20, textAlign: 'center', paddingHorizontal: 8 },
   tarjeta: { backgroundColor: colors.card, borderRadius: 12, borderWidth: 1, borderColor: colors.border, padding: 16, gap: 10 },
-  etiqueta: { color: colors.textMuted, fontSize: 13, fontWeight: '700', textTransform: 'uppercase', letterSpacing: 0.5 },
+  etiqueta: { color: colors.textMuted, fontSize: 13, fontWeight: '700' },
   instalacionId: { color: colors.text, fontSize: 26, fontWeight: '800', textAlign: 'center', letterSpacing: 3 },
   ayuda: { color: colors.textMuted, fontSize: 13, lineHeight: 19 },
   input: { backgroundColor: colors.input, borderWidth: 1, borderColor: colors.border, borderRadius: 10, padding: 14, color: colors.text, fontSize: 18, fontWeight: '700', textAlign: 'center', letterSpacing: 1 },

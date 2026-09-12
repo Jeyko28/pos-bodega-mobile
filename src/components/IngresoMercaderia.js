@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react'
-import { View, Text, TextInput, TouchableOpacity, ScrollView, StyleSheet, Alert, Keyboard } from 'react-native'
+import { View, Text, TextInput, TouchableOpacity, ScrollView, StyleSheet, Keyboard } from 'react-native'
 import { KeyboardAwareScrollView } from 'react-native-keyboard-aware-scroll-view'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { Ionicons } from '@expo/vector-icons'
@@ -8,6 +8,7 @@ import db from '../data/db'
 import BarcodeScannerModal from './BarcodeScannerModal'
 import { iconoCategoria } from '../data/categorias'
 import { coincide } from '../utils/texto'
+import BarraBusqueda from './BarraBusqueda'
 import AvisoHoja from './AvisoHoja'
 import { useLetra } from '../context/LetraContext'
 import { PRESETS_BULTO, sugerirBulto, resolverBulto, sugerirPrecio } from '../data/bultos'
@@ -32,6 +33,7 @@ export default function IngresoMercaderia({ onCerrar, onGuardado }) {
   const [retomado, setRetomado] = useState(0)
   const [cargado, setCargado] = useState(false)
   const [avisoExito, setAvisoExito] = useState(null)
+  const [aviso, setAviso] = useState(null)
   const [codigoDesconocido, setCodigoDesconocido] = useState(null)
   const [nuevo, setNuevo] = useState({ nombre: '', precio: '', cantidad: '1' })
   const [ultimoAgregado, setUltimoAgregado] = useState(null)
@@ -215,13 +217,14 @@ export default function IngresoMercaderia({ onCerrar, onGuardado }) {
     // nombre antes de guardar: perder un producto calladito es plata perdida.
     const incompletas = entradas.filter(e => unidadesDe(e) <= 0)
     if (incompletas.length) {
-      Alert.alert(
-        'Hay filas sin cantidad',
-        `${incompletas.map(e => `• ${e.nombre}`).join('\n')}\n\nEsas no se van a guardar. ¿Guardamos el resto igual?`,
-        [
-          { text: 'Revisar', style: 'cancel' },
-          { text: 'Guardar el resto', onPress: guardarAhora },
-        ])
+      setAviso({
+        titulo: 'Hay filas sin cantidad',
+        mensaje: `${incompletas.map(e => `• ${e.nombre}`).join('\n')}\n\nEsas no se van a guardar. ¿Guardamos el resto igual?`,
+        botones: [
+          { texto: 'Revisar' },
+          { texto: 'Guardar el resto', primario: true, onPress: () => { setAviso(null); guardarAhora() } },
+        ],
+      })
       return
     }
     guardarAhora()
@@ -260,7 +263,7 @@ export default function IngresoMercaderia({ onCerrar, onGuardado }) {
 
   async function deshacerUltimoIngreso() {
     const d = await db.deshacerIngreso(avisoExito.ingresoId)
-    if (!d.success) { Alert.alert('No se pudo deshacer', d.error); return }
+    if (!d.success) { setAviso({ titulo: 'No se pudo deshacer', mensaje: d.error }); return }
     onGuardado?.({ actualizados: 0 })
     setAvisoExito({ titulo: 'Ingreso deshecho', mensaje: 'El stock volvió a como estaba.' })
   }
@@ -271,41 +274,40 @@ export default function IngresoMercaderia({ onCerrar, onGuardado }) {
   }
 
   async function deshacerDesdeHistorial(ingreso) {
-    Alert.alert(
-      'Deshacer este ingreso',
-      `Se le restará al stock lo que sumó este ingreso (${ingreso.productos} productos). Esto no se puede volver a aplicar.`,
-      [
-        { text: 'Cancelar', style: 'cancel' },
+    setAviso({
+      titulo: 'Deshacer este ingreso',
+      mensaje: `Se le restará al stock lo que sumó este ingreso (${ingreso.productos} productos). Esto no se puede volver a aplicar.`,
+      botones: [
+        { texto: 'Cancelar' },
         {
-          text: 'Deshacer',
-          style: 'destructive',
+          texto: 'Deshacer', peligro: true,
           onPress: async () => {
+            setAviso(null)
             const d = await db.deshacerIngreso(ingreso.id)
-            if (!d.success) { Alert.alert('No se pudo deshacer', d.error); return }
+            if (!d.success) { setAviso({ titulo: 'No se pudo deshacer', mensaje: d.error }); return }
             setIngresos(db.getIngresos())
             setProductos(db.getProductos())
             onGuardado?.({ actualizados: 0 })
           },
         },
       ],
-    )
+    })
   }
 
   function salir() {
     if (!entradas.length) { onCerrar(); return }
-    Alert.alert(
-      'Dejar el ingreso a medias',
-      `Tienes ${entradas.length} productos en la lista. Puedes seguir después: se guardan hasta que los ingreses o los descartes.`,
-      [
-        { text: 'Cancelar', style: 'cancel' },
-        { text: 'Seguir después', onPress: onCerrar },
+    setAviso({
+      titulo: 'Dejar el ingreso a medias',
+      mensaje: `Tienes ${entradas.length} productos en la lista. Puedes seguir después: se guardan hasta que los ingreses o los descartes.`,
+      botones: [
+        { texto: 'Cancelar' },
+        { texto: 'Seguir después', onPress: onCerrar },
         {
-          text: 'Descartar',
-          style: 'destructive',
-          onPress: async () => { await db.updateConfig({ ingreso_en_curso: [] }); onCerrar() },
+          texto: 'Descartar', peligro: true,
+          onPress: async () => { setAviso(null); await db.updateConfig({ ingreso_en_curso: [] }); onCerrar() },
         },
       ],
-    )
+    })
   }
 
   const totalUnidades = entradas.reduce((s, e) => s + unidadesDe(e), 0)
@@ -326,7 +328,7 @@ export default function IngresoMercaderia({ onCerrar, onGuardado }) {
       <View style={[styles.encabezado, { paddingTop: insets.top + 14 }]}>
         <Text style={styles.titulo}>Ingresar mercadería</Text>
           <Text style={styles.ayuda}>
-            Escanea o busca lo que llegó y escribe la cantidad. Se <Text style={{ fontWeight: '700' }}>suma</Text> a lo que ya tenías; no hace falta que calcules el total. Si vino por caja o paquete, toca 📦 Bulto y la app convierte sola.
+            Escanea o busca lo que llegó: se suma solo (por bulto, toca 📦 Bulto).
           </Text>
         {retomado > 0 && vista === 'ingreso' && (
           <Text style={styles.retomado}>
@@ -372,13 +374,7 @@ export default function IngresoMercaderia({ onCerrar, onGuardado }) {
 
       {vista === 'ingreso' && (
       <View style={styles.filaBusqueda}>
-        <TextInput
-          style={styles.buscador}
-          placeholder="Buscar producto..."
-          placeholderTextColor={colors.placeholder}
-          value={busqueda}
-          onChangeText={setBusqueda}
-        />
+        <BarraBusqueda valor={busqueda} onCambiar={setBusqueda} textoGuia="Buscar producto..." />
         <TouchableOpacity style={styles.botonEscanear} onPress={() => { Keyboard.dismiss(); setScanner(true) }}>
           <Ionicons name="barcode-outline" size={24} color={colors.text} />
         </TouchableOpacity>
@@ -645,6 +641,15 @@ export default function IngresoMercaderia({ onCerrar, onGuardado }) {
           onCerrar={() => setAvisoExito(null)}
         />
       )}
+
+      {aviso && (
+        <AvisoHoja
+          titulo={aviso.titulo}
+          mensaje={aviso.mensaje}
+          botones={aviso.botones || [{ texto: 'Entendido', primario: true }]}
+          onCerrar={() => setAviso(null)}
+        />
+      )}
     </View>
   )
 }
@@ -654,7 +659,7 @@ const crearStyles = (tx) => ({
   root: { flex: 1, backgroundColor: colors.bg },
   encabezado: { padding: 16, paddingBottom: 10, backgroundColor: colors.card, borderBottomWidth: 1, borderBottomColor: colors.border },
   titulo: { color: colors.text, fontWeight: '700', fontSize: tx(17) },
-  ayuda: { color: colors.textMuted, fontSize: tx(13), lineHeight: 17, marginTop: 6 },
+  ayuda: { color: colors.textoAyuda, fontSize: tx(14), lineHeight: 19, marginTop: 6 },
 
   retomado: { color: colors.accent, fontSize: tx(13), fontWeight: '700', marginTop: 8 },
   enlaceHistorial: { color: colors.accent, fontSize: tx(13), fontWeight: '700', marginTop: 10 },
@@ -669,7 +674,7 @@ const crearStyles = (tx) => ({
   botonEscanear: { width: 48, height: 48, alignItems: 'center', justifyContent: 'center', borderRadius: 10, borderWidth: 1, borderColor: colors.borderStrong, backgroundColor: colors.card },
 
   lista: { flex: 1, paddingHorizontal: 12 },
-  subtitulo: { color: colors.textMuted, fontSize: tx(13), fontWeight: '700', textTransform: 'uppercase', letterSpacing: 0.5, marginTop: 8, marginBottom: 8 },
+  subtitulo: { color: colors.textMuted, fontSize: tx(13), fontWeight: '700', marginTop: 8, marginBottom: 8 },
   separador: { height: 1, backgroundColor: colors.border, marginVertical: 12 },
 
   filaEntrada: { flexDirection: 'row', alignItems: 'center', gap: 8, backgroundColor: colors.accentBg, borderRadius: 10, padding: 12, marginBottom: 8, borderWidth: 1, borderColor: colors.primary },
@@ -690,8 +695,8 @@ const crearStyles = (tx) => ({
   presetTexto: { color: colors.text, fontWeight: '600', fontSize: tx(13) },
   bultoOtroFila: { flexDirection: 'row', gap: 8, alignItems: 'center' },
   bultoFila: { flexDirection: 'row', gap: 8, alignItems: 'center' },
-  cantidadBulto: { width: 64, backgroundColor: colors.input, borderWidth: 1, borderColor: colors.borderStrong, borderRadius: 8, paddingVertical: 10, textAlign: 'center', color: colors.text, fontSize: tx(15), fontWeight: '700' },
-  bultoEtiqueta: { flex: 1, color: colors.text, fontSize: tx(14), fontWeight: '600' },
+  cantidadBulto: { width: 72, backgroundColor: colors.input, borderWidth: 1, borderColor: colors.borderStrong, borderRadius: 8, paddingVertical: 10, textAlign: 'center', color: colors.text, fontSize: tx(18), fontWeight: '700' },
+  bultoEtiqueta: { flex: 1, color: colors.text, fontSize: tx(15), fontWeight: '600' },
   cambiarBulto: { color: colors.accent, fontSize: tx(14), fontWeight: '700', padding: 10 },
   bultoCodigoFijo: { color: colors.textMuted, fontSize: tx(13), fontWeight: '600' },
   previewBulto: { color: colors.accent, fontSize: tx(13), fontWeight: '700', lineHeight: 18 },
