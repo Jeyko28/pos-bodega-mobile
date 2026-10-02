@@ -24,8 +24,8 @@ function obtenerBlur() {
 }
 
 export default function AvisoHoja({ titulo, mensaje, botones = [{ texto: 'Listo', primario: true }], onCerrar }) {
-  // Medido en cada render: cachear el alto una sola vez fallaba cuando el
-  // módulo cargaba con métricas viejas y la tarjeta caía abajo.
+  // minHeight de pantalla completa: el centrado no depende del alto del
+  // contenedor padre (una hoja a medias lo empujaba abajo).
   const { height } = useWindowDimensions()
   const Blur = obtenerBlur()
   return (
@@ -53,9 +53,17 @@ export default function AvisoHoja({ titulo, mensaje, botones = [{ texto: 'Listo'
 const styles = StyleSheet.create({
   // minHeight de pantalla completa: el centrado no depende del alto del
   // contenedor padre (una hoja a medias lo empujaba abajo).
-  fondo: { ...StyleSheet.absoluteFillObject, backgroundColor: colors.overlay, justifyContent: 'center', alignItems: 'center', padding: 24, zIndex: 10 },
+  // position:absolute ESCRITO A MANO, no spread de absoluteFillObject: el
+  // spread no aplicaba el absoluto en Android (medido: fondo en y=276,
+  // lista colapsada a h=0) y la tarjeta caía abajo sin fondo. Verificado
+  // en emulador con sonda onLayout + captura.
+  fondo: { position: 'absolute', left: 0, right: 0, top: 0, bottom: 0, backgroundColor: colors.overlay, justifyContent: 'center', alignItems: 'center', padding: 24, zIndex: 10 },
   fondoBlur: { backgroundColor: 'transparent' },
-  caja: { width: '100%', backgroundColor: colors.card, borderRadius: 16, padding: 20, gap: 10 },
+  caja: { width: '100%', backgroundColor: colors.card, borderRadius: 16, padding: 20, gap: 10,
+    // Relieve para que no parezca texto flotando: borde fino completo +
+    // sombra marcada (elevation en Android, shadow en iOS).
+    borderWidth: 1.5, borderColor: colors.borderStrong,
+    elevation: 8, shadowColor: '#000', shadowOpacity: 0.3, shadowRadius: 12, shadowOffset: { width: 0, height: 6 } },
   titulo: { color: colors.text, fontSize: 18, fontWeight: '800', textAlign: 'center' },
   mensaje: { color: colors.textMuted, fontSize: 14, lineHeight: 20, textAlign: 'center' },
   filaBotones: { flexDirection: 'row', gap: 10, marginTop: 6 },

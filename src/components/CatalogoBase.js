@@ -60,9 +60,10 @@ export default function CatalogoBase({ onCerrar, onAgregados, onIrAIngreso }) {
     onAgregados?.(r)
     // El alta no es el abastecer: entran en 0 y el puente lleva directo a
     // ingresar lo que hay en el estante, que es el paso que siempre faltaba.
+    const cuantos = r.agregados === 1 ? 'Se agregó 1 producto' : `Se agregaron ${r.agregados} productos`
     setAviso({
       titulo: '✓ Listo',
-      mensaje: `Se agregaron ${r.agregados} productos.${r.omitidos ? ` ${r.omitidos} ya existían.` : ''}\n\nEntraron sin stock. ¿Ingresamos lo que tienes en el estante?`,
+      mensaje: `${cuantos}.${r.omitidos ? ` ${r.omitidos} ya existían.` : ''}\n\nEntraron sin stock. ¿Ingresamos lo que tienes en el estante?`,
       botones: [
         { texto: 'Después', onPress: onCerrar },
         { texto: 'Ingresar mercadería', primario: true, onPress: () => { setAviso(null); onIrAIngreso?.() || onCerrar() } },

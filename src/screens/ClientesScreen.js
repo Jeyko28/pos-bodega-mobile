@@ -4,6 +4,7 @@ import { useFocusEffect } from '@react-navigation/native'
 import db from '../data/db'
 import BarraBusqueda from '../components/BarraBusqueda'
 import AvisoHoja from '../components/AvisoHoja'
+import { chips } from '../theme/chips'
 import { colors } from '../theme/colors'
 import { armarMensajeCobranza, abrirWhatsApp, aFormatoLlamada } from '../utils/cobranza'
 import { usePieDeHoja } from '../utils/teclado'
@@ -37,14 +38,27 @@ export default function ClientesScreen() {
   const [telefonoEdit, setTelefonoEdit] = useState('')
   const [borradorMensaje, setBorradorMensaje] = useState(null)
   const [avisoListo, setAvisoListo] = useState(null)
+  const [aviso, setAviso] = useState(null)
+  const [errorForm, setErrorForm] = useState(null)
+  // Orden de la lista: nombre (A-Z, respeta tildes), recientes (último
+  // creado primero), debe más (monto pendiente) o más fiados (veces totales).
+  const [orden, setOrden] = useState('nombre')
 
   useFocusEffect(useCallback(() => { cargar() }, []))
 
   function cargar() { setClientes(db.getClientes()) }
 
   async function guardarCliente() {
-    if (!form.nombre.trim()) return
-    await db.addCliente(form)
+    // El nombre es solo letras: los dígitos no se dejan ni tipear (se filtran
+    // al escribir), pero se valida igual por si entra por autocompletado.
+    const nombre = form.nombre.trim().replace(/\s+/g, ' ')
+    if (!nombre) { setErrorForm('Escribe su nombre (solo letras).'); return }
+    if (/\d/.test(nombre) || !/[A-Za-zÁÉÍÓÚÜÑáéíóúüñ]/.test(nombre)) {
+      setErrorForm('El nombre es solo letras, sin números.');
+      return
+    }
+    setErrorForm(null)
+    await db.addCliente({ nombre, telefono: form.telefono })
     setForm({ nombre: '', telefono: '' })
     setModalNuevo(false)
     cargar()
@@ -87,7 +101,16 @@ export default function ClientesScreen() {
     setBorradorMensaje(null)
   }
 
-  const clientesFiltrados = clientes.filter(c => coincide(c.nombre, busqueda))
+  const clientesFiltrados = clientes
+    .filter(c => coincide(c.nombre, busqueda))
+    .sort((a, b) => {
+      // El orden va en JS y no en SQL a propósito: igual que la búsqueda,
+      // respeta tildes (Núñez junto a Nunez) y la lista es chica.
+      if (orden === 'recientes') return b.id - a.id
+      if (orden === 'deuda') return (b.deuda_total || 0) - (a.deuda_total || 0) || a.nombre.localeCompare(b.nombre)
+      if (orden === 'veces') return (b.fiados_veces || 0) - (a.fiados_veces || 0) || (b.fiados_pendientes || 0) - (a.fiados_pendientes || 0) || a.nombre.localeCompare(b.nombre)
+      return a.nombre.localeCompare(b.nombre)
+    })
 
   const deudaTotal = fiados.filter(f => f.estado === 'pendiente').reduce((s, f) => s + f.saldo, 0)
 
@@ -119,8 +142,33 @@ export default function ClientesScreen() {
   const recibidoNum = parseFloat(recibido)
   const vuelto = isNaN(recibidoNum) ? null : Math.round((recibidoNum - (parseFloat(montoAbono) || 0)) * 100) / 100
 
-  async function abonar() {
-    setAbonando(true)
+  // Borrar solo si no tiene movimientos (lo verifica la base). Pide
+  // confirmación porque no hay deshacer: el casero borrado no vuelve.
+  function pedirBorrarCliente() {
+    if (!clienteDetalle) return
+    setAvisoListo({
+      titulo: '¿Borrar casero?',
+      mensaje: `Se borra "${clienteDetalle.nombre}" para siempre. Solo sigue si no tiene fiados ni ventas.`,
+      botones: [
+        { texto: 'Cancelar' },
+        { texto: 'Borrar', peligro: true, onPress: confirmarBorrarCliente },
+      ],
+    })
+  }
+
+  async function confirmarBorrarCliente() {
+    if (!clienteDetalle) return
+    const r = db.borrarCliente(clienteDetalle.id)
+    if (!r.ok) { setAvisoListo({ titulo: 'No se puede borrar', mensaje: r.motivo }); return }
+    const nombre = clienteDetalle.nombre
+    setAvisoListo(null)
+    setClienteDetalle(null)
+    setBorradorMensaje(null)
+    cargar()
+    setAviso({ titulo: '✓ Casero borrado', mensaje: `"${nombre}" ya no está en tu lista.` })
+  }
+
+  async function abonar() {    setAbonando(true)
     const r = await db.abonarACliente({
       clienteId: clienteDetalle.id,
       monto: montoAbono,
@@ -147,6 +195,19 @@ export default function ClientesScreen() {
         <TouchableOpacity style={styles.botonNuevo} onPress={() => { Keyboard.dismiss(); setModalNuevo(true) }}><Text style={styles.botonNuevoTexto}>+ Cliente</Text></TouchableOpacity>
       </View>
 
+      <ScrollView horizontal showsHorizontalScrollIndicator={false} style={chips.scroll} contentContainerStyle={[chips.contenido, { paddingVertical: 4 }]}>
+        {[
+          ['nombre', 'A – Z'],
+          ['recientes', '🕒 Recientes'],
+          ['deuda', '💰 Debe más'],
+          ['veces', '📒 Más fiados'],
+        ].map(([id, etiqueta]) => (
+          <TouchableOpacity key={id} onPress={() => setOrden(id)} style={[chips.chip, orden === id && chips.chipActivo]}>
+            <Text style={[chips.texto, orden === id && chips.textoActivo]}>{etiqueta}</Text>
+          </TouchableOpacity>
+        ))}
+      </ScrollView>
+
       <FlatList
         data={clientesFiltrados}
         keyExtractor={c => String(c.id)}
@@ -164,10 +225,11 @@ export default function ClientesScreen() {
       <Modal visible={modalNuevo} transparent animationType="slide" onRequestClose={() => setModalNuevo(false)}>
         <View style={[styles.modalFondo, { paddingBottom: alturaTeclado }]}>
           <Pressable style={StyleSheet.absoluteFill} onPress={() => setModalNuevo(false)} />
-          <ScrollView style={styles.modalScrollLimite} contentContainerStyle={[styles.modalCaja, { paddingBottom: 20 + espacioAbajo }]} keyboardShouldPersistTaps="handled">
+          <ScrollView style={styles.modalScroll} contentContainerStyle={[styles.modalCaja, { paddingBottom: 20 + espacioAbajo }]} keyboardShouldPersistTaps="handled">
             <Text style={styles.modalTitulo}>Nuevo cliente</Text>
-            <TextInput style={styles.input} placeholder="Nombre" placeholderTextColor={colors.placeholder} value={form.nombre} onChangeText={v => setForm(f => ({ ...f, nombre: v }))} />
-            <TextInput style={styles.input} placeholder="Teléfono (opcional)" placeholderTextColor={colors.placeholder} value={form.telefono} onChangeText={v => setForm(f => ({ ...f, telefono: v }))} />
+            <TextInput style={styles.input} placeholder="Nombre (solo letras)" placeholderTextColor={colors.placeholder} value={form.nombre} onChangeText={v => { setErrorForm(null); setForm(f => ({ ...f, nombre: v.replace(/[0-9]/g, '') })) }} />
+            <TextInput style={styles.input} placeholder="Teléfono (opcional, solo números)" placeholderTextColor={colors.placeholder} keyboardType="phone-pad" value={form.telefono} onChangeText={v => setForm(f => ({ ...f, telefono: v.replace(/[^0-9]/g, '') }))} />
+            {!!errorForm && <Text style={styles.errorForm}>{errorForm}</Text>}
             <View style={styles.filaBotones}>
               <TouchableOpacity style={styles.botonGhost} onPress={() => setModalNuevo(false)}><Text style={styles.botonGhostTexto}>Cancelar</Text></TouchableOpacity>
               <TouchableOpacity style={styles.botonPrimario} onPress={guardarCliente}><Text style={styles.botonPrimarioTexto}>Guardar</Text></TouchableOpacity>
@@ -180,22 +242,22 @@ export default function ClientesScreen() {
       <Modal visible={!!clienteDetalle} transparent animationType="slide" onRequestClose={cerrarDetalle}>
         <View style={[styles.modalFondo, { paddingBottom: alturaTeclado }]}>
           <Pressable style={StyleSheet.absoluteFill} onPress={cerrarDetalle} />
-          <ScrollView style={{ maxHeight: '80%' }} contentContainerStyle={[styles.modalCaja, fiados.length === 0 && styles.modalCajaCorta, { paddingBottom: 20 + espacioAbajo }]} keyboardShouldPersistTaps="handled">
+          <ScrollView style={styles.modalScroll} contentContainerStyle={[styles.modalCaja, { paddingBottom: 20 + espacioAbajo }]} keyboardShouldPersistTaps="handled">
             <Text style={styles.modalTitulo}>{clienteDetalle?.nombre}</Text>
 
             {/* El teléfono se puede guardar siempre, deba o no: si solo apareciera
                 con deuda, habría que esperar a que deba para poder anotarlo. */}
             <View style={styles.bloqueCobranza}>
               <View style={styles.filaTelefono}>
-                <TextInput
-                  style={[styles.input, { flex: 1 }]}
-                  placeholder="Teléfono (para escribirle por WhatsApp)"
-                  placeholderTextColor={colors.placeholder}
-                  keyboardType="phone-pad"
-                  value={telefonoEdit}
-                  onChangeText={setTelefonoEdit}
-                  onBlur={guardarTelefono}
-                />
+                  <TextInput
+                    style={[styles.input, { flex: 1 }]}
+                    placeholder="Teléfono (para escribirle por WhatsApp)"
+                    placeholderTextColor={colors.placeholder}
+                    keyboardType="phone-pad"
+                    value={telefonoEdit}
+                    onChangeText={v => setTelefonoEdit(v.replace(/[^0-9]/g, ''))}
+                    onBlur={guardarTelefono}
+                  />
                 {telefonoCambiado && (
                   <TouchableOpacity style={styles.botonGuardarTel} onPress={guardarTelefono}>
                     <Text style={styles.botonGuardarTelTexto}>Guardar</Text>
@@ -346,18 +408,28 @@ export default function ClientesScreen() {
             </View>
           </ScrollView>
           <View style={[styles.pieFicha, { paddingBottom: 12 + espacioAbajo }]}>
-            <TouchableOpacity style={styles.botonGhost} onPress={cerrarDetalle}><Text style={styles.botonGhostTexto}>Cerrar</Text></TouchableOpacity>
+            <TouchableOpacity style={styles.botonBorrar} onPress={pedirBorrarCliente}><Text style={styles.botonBorrarTexto}>Borrar</Text></TouchableOpacity>
+            <TouchableOpacity style={[styles.botonGhost, { flex: 2 }]} onPress={cerrarDetalle}><Text style={styles.botonGhostTexto}>Cerrar</Text></TouchableOpacity>
           </View>
           {avisoListo && (
             <AvisoHoja
               titulo={avisoListo.titulo}
               mensaje={avisoListo.mensaje}
-              botones={[{ texto: 'Listo', primario: true }]}
+              botones={avisoListo.botones || [{ texto: 'Listo', primario: true }]}
               onCerrar={() => setAvisoListo(null)}
             />
           )}
         </View>
       </Modal>
+
+      {aviso && (
+        <AvisoHoja
+          titulo={aviso.titulo}
+          mensaje={aviso.mensaje}
+          botones={[{ texto: 'Listo', primario: true }]}
+          onCerrar={() => setAviso(null)}
+        />
+      )}
     </View>
   )
 }
@@ -378,17 +450,20 @@ const crearStyles = (tx) => ({
   vacioTitulo: { color: colors.text, fontWeight: '700', fontSize: tx(15) },
   vacioTexto: { color: colors.textMuted, fontSize: tx(13), textAlign: 'center', lineHeight: 18 },
   modalFondo: { flex: 1, backgroundColor: colors.overlay, justifyContent: 'flex-end' },
-  modalCaja: { backgroundColor: colors.card, borderTopLeftRadius: 20, borderTopRightRadius: 20, padding: 20, gap: 10, minHeight: 380 },
-  // Ficha vacía: la hoja se ancla abajo (cerca de gestos) y crece hacia
-  // arriba al llegar movimientos, con tope en el 85% del modal. Solo con
-  // contenido corto: con historial largo el flex-end recortaría lo de arriba.
-  modalCajaCorta: { minHeight: 460, justifyContent: 'flex-end' },
-  modalScrollLimite: { flexGrow: 0, maxHeight: '85%' },
+  modalCaja: { backgroundColor: colors.card, borderTopLeftRadius: 20, borderTopRightRadius: 20, padding: 20, gap: 10 },
+  // La hoja envuelve su contenido (flexGrow 0) con tope en 85%: anclada
+  // abajo, si el historial crece la lista se extiende hacia arriba y después
+  // scrollea adentro. Sin minHeight: el parche anterior dejaba un hueco gris
+  // entre el contenido y Cerrar cuando no había movimientos.
+  modalScroll: { flexGrow: 0, maxHeight: '85%' },
   modalTitulo: { color: colors.text, fontWeight: '700', fontSize: tx(16), marginBottom: 4 },
+  errorForm: { color: colors.danger, fontSize: tx(13), fontWeight: '600' },
   input: { backgroundColor: colors.input, borderWidth: 1, borderColor: colors.border, borderRadius: 10, padding: 12, color: colors.text, fontSize: tx(15) },
   filaBotones: { flexDirection: 'row', gap: 10, marginTop: 8 },
   botonGhost: { flex: 1, padding: 14, borderRadius: 10, borderWidth: 1, borderColor: colors.border, alignItems: 'center' },
   botonGhostTexto: { color: colors.textMuted, fontWeight: '600' },
+  botonBorrar: { flex: 1, padding: 14, borderRadius: 10, borderWidth: 1, borderColor: colors.danger, alignItems: 'center' },
+  botonBorrarTexto: { color: colors.danger, fontWeight: '700' },
   pieFicha: { flexDirection: 'row', gap: 10, padding: 16, paddingTop: 12, backgroundColor: colors.card, borderTopWidth: 1, borderTopColor: colors.border },
   botonPrimario: { flex: 1, padding: 14, borderRadius: 10, backgroundColor: colors.primary, alignItems: 'center' },
   botonPrimarioTexto: { color: colors.primaryText, fontWeight: '700' },

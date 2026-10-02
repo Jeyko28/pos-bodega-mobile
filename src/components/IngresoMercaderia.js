@@ -258,7 +258,8 @@ export default function IngresoMercaderia({ onCerrar, onGuardado }) {
 
     // El deshacer se ofrece en el momento, que es cuando el dueño se da cuenta
     // de que escribió 500 en vez de 50.
-    setAvisoExito({ titulo: '✓ Mercadería ingresada', mensaje: `Se actualizó el stock de ${r.actualizados} productos.`, ingresoId: r.ingresoId })
+    const cuantos = r.actualizados === 1 ? 'Se actualizó el stock de 1 producto' : `Se actualizó el stock de ${r.actualizados} productos`
+    setAvisoExito({ titulo: '✓ Mercadería ingresada', mensaje: `${cuantos}.`, ingresoId: r.ingresoId })
   }
 
   async function deshacerUltimoIngreso() {

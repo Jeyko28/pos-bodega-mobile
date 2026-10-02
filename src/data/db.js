@@ -659,7 +659,13 @@ async function addCategoriaCustom({ id, icon }) {
 const SQL_CLIENTES = `
   SELECT c.*, COALESCE((
     SELECT SUM(f.saldo) FROM fiado f WHERE f.cliente_id = c.id AND f.estado = 'pendiente'
-  ), 0) AS deuda_total
+  ), 0) AS deuda_total,
+  COALESCE((
+    SELECT COUNT(*) FROM fiado f WHERE f.cliente_id = c.id AND f.estado = 'pendiente'
+  ), 0) AS fiados_pendientes,
+  COALESCE((
+    SELECT COUNT(*) FROM fiado f WHERE f.cliente_id = c.id
+  ), 0) AS fiados_veces
   FROM clientes c
 `
 
@@ -673,6 +679,24 @@ async function addCliente({ nombre, telefono, referencia, dni_ruc }) {
     'INSERT INTO clientes (nombre, telefono, referencia, dni_ruc, creado_en) VALUES (?, ?, ?, ?, ?)',
     nombre, telefono || null, referencia || null, dni_ruc || null, creadoEn)
   return { id: r.lastInsertRowId, nombre, telefono: telefono || null, referencia: referencia || null, dni_ruc: dni_ruc || null, creado_en: creadoEn }
+}
+
+// Borrar solo si no tiene ningún movimiento: ni fiados (pagados o no) ni
+// ventas asociadas. Si tiene, se bloquea con aviso en vez de borrar en
+// cascada: la historia de plata no se tira.
+function puedeBorrarCliente(clienteId) {
+  const fiados = sql.getFirstSync('SELECT COUNT(*) AS n FROM fiado WHERE cliente_id = ?', clienteId)
+  if (fiados && fiados.n > 0) return { ok: false, motivo: 'Tiene fiados anotados (pagados o no) y no se puede borrar.' }
+  const ventas = sql.getFirstSync('SELECT COUNT(*) AS n FROM ventas WHERE cliente_id = ? AND anulada = 0', clienteId)
+  if (ventas && ventas.n > 0) return { ok: false, motivo: 'Tiene ventas a su nombre y no se puede borrar.' }
+  return { ok: true }
+}
+
+function borrarCliente(clienteId) {
+  const permiso = puedeBorrarCliente(clienteId)
+  if (!permiso.ok) return permiso
+  sql.runSync('DELETE FROM clientes WHERE id = ?', clienteId)
+  return { ok: true }
 }
 
 // El filtro va en JS y no en SQL a propósito: el LIKE de SQLite no ignora
@@ -1297,7 +1321,7 @@ export default {
   getConfig, updateConfig, getBackupJSON, restaurarBackup, validarBackup,
   getEstadoLicencia, activarLicencia,
   setBulto,
-  getClientes, addCliente, updateCliente, buscarCliente,
+  getClientes, addCliente, updateCliente, buscarCliente, borrarCliente,
   getFiadoCliente, addFiado, abonarACliente, getResumenFiado, getFiadosAntiguos, anularPagoFiado,
   realizarVenta, getHistorialVentas, getDetalleVenta, getResumenHoy, getResumenPeriodo, getGanancia,
   anularVenta, cambiarMetodoPago,

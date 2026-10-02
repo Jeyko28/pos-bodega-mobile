@@ -199,6 +199,10 @@ Entorno Windows + PowerShell 5.1:
 - AVD `GamaMedia` (copia del anterior, `-skin 720x1600`): pantalla chica de gama
   media real para verificar que nada se desborda con letra normal y grande.
 - Metro corre por defecto en :8081. Si está caído, el iPhone con Expo Go no conecta.
+- El watcher de Metro no detecta cambios en esta carpeta (OneDrive): después
+  de editar, reiniciar Metro y forzar la recarga en el emulador
+  (`adb shell am force-stop host.exp.exponent` + reabrir por deep link).
+  Sin eso la app sigue corriendo el bundle viejo aunque el log no se queje.
 
 Pasos:
 

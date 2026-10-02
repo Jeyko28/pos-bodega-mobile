@@ -53,5 +53,7 @@ export default function BotonHeader({ icono, activo = false, colorActivo = color
 const styles = StyleSheet.create({
   zona: { paddingHorizontal: 12, paddingVertical: 4 },
   contenedor: { width: 48, height: 40, alignItems: 'center', justifyContent: 'center' },
-  pastilla: { ...StyleSheet.absoluteFillObject, borderRadius: 999, backgroundColor: colors.accentBg },
+  // position:absolute escrito a mano: el spread de absoluteFillObject no
+  // aplicaba el absoluto en Android (ver AvisoHoja) y la pastilla quedaba mal.
+  pastilla: { position: 'absolute', left: 0, right: 0, top: 0, bottom: 0, borderRadius: 999, backgroundColor: colors.accentBg },
 })
