@@ -386,6 +386,101 @@ async function completarSetup({ negocioNombre, adminNombre, adminUsername, admin
   }
 }
 
+// Unirse a una bodega que ya existe en otra máquina.
+//
+// Caso que hay que cubrir: el respaldo trae usuarios (sin clave) y la persona
+// que se une elige un nombre de usuario que YA existe ahí. La columna
+// `username` es UNIQUE, así que insertarlo revienta la unión entera y la
+// persona se queda sin su bodega. Se resuelve aquí, no en la pantalla: si el
+// nombre está tomado por alguien del respaldo, se le agrega un número.
+//
+// La unión solo restaura este dispositivo, así que no es una migración de
+// cuentas entre máquinas: la contraseña de la cuenta nueva es la única que
+// funciona acá. Eso hay que decirlo en la pantalla, no esconderlo.
+//
+// El caso: la bodeguera reinstala la app, o quiere usarla en un segundo
+// celular. El archivo de respaldo trae los datos (productos, ventas, fiados)
+// pero NO las contraseñas — un respaldo sale del teléfono y las claves no
+// viajan con él a propósito. Así que quien entra crea la suya.
+//
+// `restaurarBackup` deja vacía la tabla `usuarios` (borra todo lo que haya) y
+// no crea ninguno, porque estaba pensado para usarse sobre una base ya
+// configurada. Por eso esto va aparte: restaura los datos y crea el usuario
+// en el mismo paso, para que la app no quede en un estado intermedio en el
+// que no se puede entrar.
+//
+// Los usuarios que vienen en el respaldo se conservan con sus nombres y roles
+// —el historial de ventas los referencia por id, así que borrarlos dejaría
+// ventas huérfanas— pero con la marca SIN_CLAVE: no pueden entrar desde este
+// equipo. La columna `password` es NOT NULL, así que "sin clave" es un valor,
+// no NULL.
+const SIN_CLAVE = 'sin-clave'
+
+// Una cuenta con SIN_CLAVE no es un login válido: aunque alguien teclee ese
+// texto como contraseña, no abre. Sin esto, un usuario del respaldo sería
+// una puerta trasera.
+function usuarioTieneClave(u) {
+  return !!u?.password && u.password !== SIN_CLAVE
+}
+
+async function unirseConRespaldo({ datos, adminNombre, adminUsername, adminPassword }) {
+  const { valido, error, resumen } = validarBackup(datos)
+  if (!valido) return { success: false, error }
+
+  // El hash se calcula ANTES de la transacción: hashear es una operación
+  // asíncrona (expo-crypto) y dentro de `withTransactionSync` no se puede
+  // esperar. Hashear afuera también evita dejar la transacción abierta si el
+  // hash falla.
+  const hash = await hashearPassword(adminPassword)
+
+  // Si el nombre de usuario elegido ya viene en el respaldo, se le agrega un
+  // número. `username` es UNIQUE y sin esto la unión falla entera: la persona
+  // se queda sin su bodega por haber elegido "admin", que es justo lo que
+  // hace cualquiera la primera vez.
+  let usernameFinal = String(adminUsername || '').trim()
+  const enElRespaldo = new Set((datos.usuarios || []).map(u => String(u.username).toUpperCase()))
+  if (enElRespaldo.has(usernameFinal.toUpperCase())) {
+    let n = 2
+    while (enElRespaldo.has(`${usernameFinal}${n}`.toUpperCase())) n++
+    usernameFinal = `${usernameFinal}${n}`
+  }
+
+  try {
+    sql.withTransactionSync(() => {
+      ;['ventas', 'fiado', 'pagos_fiado', 'usuarios'].forEach(t => sql.runSync(`DELETE FROM ${t}`))
+      ;(datos.usuarios || []).forEach(u => sql.runSync(
+        'INSERT INTO usuarios (id, nombre, username, password, rol, activo, creado_en) VALUES (?, ?, ?, ?, ?, 1, ?)',
+        u.id, u.nombre, u.username, SIN_CLAVE, u.rol || 'cajero', u.creado_en || new Date().toISOString()))
+      // La persona que se une crea la suya: es la dueña de esta máquina.
+      const r = sql.runSync(
+        'INSERT INTO usuarios (nombre, username, password, rol, activo, creado_en) VALUES (?, ?, ?, ?, 1, ?)',
+        adminNombre, usernameFinal, hash, 'admin', new Date().toISOString())
+      restaurarTablas(datos)
+      escribirConfig('negocio_nombre', datos.config?.negocio_nombre || resumen.negocio || 'Mi bodega')
+      escribirConfig('setup_completado', true)
+      // Marca de que esta bodega vino de otra máquina. Sirve para diagnosticar
+      // y para que la app sepa que no es una instalación nueva.
+      escribirConfig('unido_desde_respaldo', true)
+      return r
+    })
+  } catch (e) {
+    return { success: false, error: e?.message || String(e) }
+  }
+
+  const usuario = sql.getFirstSync('SELECT * FROM usuarios WHERE username = ?', usernameFinal)
+  return {
+    success: true,
+    usuario: usuario && {
+      id: usuario.id, nombre: usuario.nombre, username: usuario.username,
+      rol: usuario.rol, activo: true, creado_en: usuario.creado_en,
+    },
+    // Si hubo que renombrar, la pantalla lo dice: si no, la persona entra con
+    // "admin2" sin entender por qué y piensa que la app está rota.
+    usernameCambiado: usernameFinal !== String(adminUsername || '').trim() ? usernameFinal : null,
+    resumen,
+  }
+}
+
 // ─── AUTH / USUARIOS ────────────────────────────────────────────────
 async function login(username, password) {
   const u = sql.getFirstSync('SELECT * FROM usuarios WHERE username = ? AND activo = 1', username)
@@ -393,6 +488,10 @@ async function login(username, password) {
   // de los dos falló le confirma a un extraño qué usuarios existen.
   const error = { success: false, error: 'Usuario o contraseña incorrectos' }
   if (!u) return error
+  // Una cuenta sin clave (traída de un respaldo al unirse a una bodega) no
+  // puede entrar por acá, aunque alguien teclee el marcador. Sin esta línea,
+  // teclear "sin-clave" abriría la puerta.
+  if (!usuarioTieneClave(u)) return error
   if (!(await passwordCoincide(password, u.password))) return error
 
   // Migración transparente: si la contraseña estaba en texto plano y acertó,
@@ -1296,6 +1395,50 @@ export function validarBackup(datos) {
   }
 }
 
+// Vuelca las tablas del negocio desde un respaldo. NO toca `usuarios`: las
+// contraseñas no viajan en el respaldo a propósito, así que restaurarlas
+// dejaría a todos sin poder entrar. Quien llama decide qué hacer con los
+// usuarios (restaurarBackup los deja como están; unirseConRespaldo crea uno
+// nuevo para esta máquina).
+function restaurarTablas(datos) {
+  ;['detalle_ventas', 'ventas', 'pagos_fiado', 'fiado', 'productos', 'clientes', 'categorias_custom']
+    .forEach(tabla => sql.runSync(`DELETE FROM ${tabla}`))
+
+  ;(datos.productos || []).forEach(p => sql.runSync(
+    'INSERT INTO productos (id, nombre, precio, stock, codigo, categoria, tipo_venta, unidad, creado_en, costo, bulto_unidades, bulto_nombre, bulto_codigo) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+    p.id, p.nombre, p.precio, p.stock, p.codigo ?? null, p.categoria ?? 'General', p.tipo_venta || 'unidad', p.unidad || 'unidad', p.creado_en || new Date().toISOString(),
+    p.costo ?? null, p.bulto_unidades ?? null, p.bulto_nombre ?? null, p.bulto_codigo ?? null))
+
+  ;(datos.clientes || []).forEach(c => sql.runSync(
+    'INSERT INTO clientes (id, nombre, telefono, referencia, dni_ruc, creado_en) VALUES (?, ?, ?, ?, ?, ?)',
+    c.id, c.nombre, c.telefono ?? null, c.referencia ?? null, c.dni_ruc ?? null, c.creado_en || new Date().toISOString()))
+
+  ;(datos.ventas || []).forEach(v => sql.runSync(
+    'INSERT INTO ventas (id, total, subtotal_bruto, descuento, tipo_descuento, monto_recibido, vuelto, metodo_pago, usuario_id, cliente_id, es_fiado, comprador_nombre, comprador_dni_ruc, fecha) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+    v.id, v.total, v.subtotal_bruto ?? v.total, v.descuento ?? 0, v.tipo_descuento ?? 'ninguno',
+    v.monto_recibido ?? 0, v.vuelto ?? 0, v.metodo_pago, v.usuario_id ?? null, v.cliente_id ?? null,
+    v.es_fiado ? 1 : 0, v.comprador_nombre ?? null, v.comprador_dni_ruc ?? null, v.fecha))
+
+  ;(datos.detalle_ventas || []).forEach(d => sql.runSync(
+    'INSERT INTO detalle_ventas (id, venta_id, producto_id, nombre_producto, precio_unitario, cantidad, subtotal, tipo_venta, unidad) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
+    d.id, d.venta_id, d.producto_id ?? null, d.nombre_producto, d.precio_unitario, d.cantidad, d.subtotal, d.tipo_venta || 'unidad', d.unidad || 'unidad'))
+
+  ;(datos.fiado || []).forEach(f => sql.runSync(
+    'INSERT INTO fiado (id, cliente_id, monto_original, saldo, concepto, usuario_id, estado, fecha) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+    f.id, f.cliente_id, f.monto_original, f.saldo, f.concepto ?? null, f.usuario_id ?? null, f.estado || 'pendiente', f.fecha))
+
+  ;(datos.pagos_fiado || []).forEach(p => sql.runSync(
+    'INSERT INTO pagos_fiado (id, fiado_id, monto, metodo_pago, usuario_id, fecha) VALUES (?, ?, ?, ?, ?, ?)',
+    p.id, p.fiado_id, p.monto, p.metodo_pago || 'Efectivo', p.usuario_id ?? null, p.fecha))
+
+  ;(datos.categorias_custom || []).forEach(c => sql.runSync(
+    'INSERT INTO categorias_custom (id, icon) VALUES (?, ?)', c.id, c.icon))
+
+  CLAVES_CONFIG_NEGOCIO.forEach(clave => {
+    if (datos.config?.[clave] !== undefined) escribirConfig(clave, datos.config[clave])
+  })
+}
+
 // Reemplaza los datos del negocio por los del respaldo. Los usuarios NO se
 // tocan a propósito: el respaldo no lleva contraseñas (no deben salir del
 // teléfono), así que restaurarlos dejaría a todos sin poder entrar. Las cuentas
@@ -1305,44 +1448,7 @@ async function restaurarBackup(datos) {
   if (!valido) return { success: false, error }
 
   try {
-    sql.withTransactionSync(() => {
-      ;['detalle_ventas', 'ventas', 'pagos_fiado', 'fiado', 'productos', 'clientes', 'categorias_custom']
-        .forEach(tabla => sql.runSync(`DELETE FROM ${tabla}`))
-
-      ;(datos.productos || []).forEach(p => sql.runSync(
-        'INSERT INTO productos (id, nombre, precio, stock, codigo, categoria, tipo_venta, unidad, creado_en, costo, bulto_unidades, bulto_nombre, bulto_codigo) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
-        p.id, p.nombre, p.precio, p.stock, p.codigo ?? null, p.categoria ?? 'General', p.tipo_venta || 'unidad', p.unidad || 'unidad', p.creado_en || new Date().toISOString(),
-        p.costo ?? null, p.bulto_unidades ?? null, p.bulto_nombre ?? null, p.bulto_codigo ?? null))
-
-      ;(datos.clientes || []).forEach(c => sql.runSync(
-        'INSERT INTO clientes (id, nombre, telefono, referencia, dni_ruc, creado_en) VALUES (?, ?, ?, ?, ?, ?)',
-        c.id, c.nombre, c.telefono ?? null, c.referencia ?? null, c.dni_ruc ?? null, c.creado_en || new Date().toISOString()))
-
-      ;(datos.ventas || []).forEach(v => sql.runSync(
-        'INSERT INTO ventas (id, total, subtotal_bruto, descuento, tipo_descuento, monto_recibido, vuelto, metodo_pago, usuario_id, cliente_id, es_fiado, comprador_nombre, comprador_dni_ruc, fecha) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
-        v.id, v.total, v.subtotal_bruto ?? v.total, v.descuento ?? 0, v.tipo_descuento ?? 'ninguno',
-        v.monto_recibido ?? 0, v.vuelto ?? 0, v.metodo_pago, v.usuario_id ?? null, v.cliente_id ?? null,
-        v.es_fiado ? 1 : 0, v.comprador_nombre ?? null, v.comprador_dni_ruc ?? null, v.fecha))
-
-      ;(datos.detalle_ventas || []).forEach(d => sql.runSync(
-        'INSERT INTO detalle_ventas (id, venta_id, producto_id, nombre_producto, precio_unitario, cantidad, subtotal, tipo_venta, unidad) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
-        d.id, d.venta_id, d.producto_id ?? null, d.nombre_producto, d.precio_unitario, d.cantidad, d.subtotal, d.tipo_venta || 'unidad', d.unidad || 'unidad'))
-
-      ;(datos.fiado || []).forEach(f => sql.runSync(
-        'INSERT INTO fiado (id, cliente_id, monto_original, saldo, concepto, usuario_id, estado, fecha) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
-        f.id, f.cliente_id, f.monto_original, f.saldo, f.concepto ?? null, f.usuario_id ?? null, f.estado || 'pendiente', f.fecha))
-
-      ;(datos.pagos_fiado || []).forEach(p => sql.runSync(
-        'INSERT INTO pagos_fiado (id, fiado_id, monto, metodo_pago, usuario_id, fecha) VALUES (?, ?, ?, ?, ?, ?)',
-        p.id, p.fiado_id, p.monto, p.metodo_pago || 'Efectivo', p.usuario_id ?? null, p.fecha))
-
-      ;(datos.categorias_custom || []).forEach(c => sql.runSync(
-        'INSERT INTO categorias_custom (id, icon) VALUES (?, ?)', c.id, c.icon))
-
-      CLAVES_CONFIG_NEGOCIO.forEach(clave => {
-        if (datos.config?.[clave] !== undefined) escribirConfig(clave, datos.config[clave])
-      })
-    })
+    sql.withTransactionSync(() => restaurarTablas(datos))
   } catch (e) {
     return { success: false, error: e?.message || String(e) }
   }
@@ -1352,7 +1458,7 @@ async function restaurarBackup(datos) {
 
 export default {
   initDB,
-  isSetupCompletado, completarSetup,
+  isSetupCompletado, completarSetup, unirseConRespaldo,
   login, getUsuarios, addUsuario, cambiarPassword, restablecerPassword, setUsuarioActivo,
   getProductos, addProducto, updateProducto, deleteProducto, getProductosBajoStock,
   addProductosLote, asignarCodigo, getMasVendidos,

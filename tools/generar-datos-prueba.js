@@ -248,7 +248,14 @@ function main() {
     fiado,
     pagos_fiado: pagos,
     categorias_custom: CATEGORIAS.slice(0, 3).map((c, i) => ({ id: c.toLowerCase(), icon: ['📦', '🧃', '🍞'][i] })),
-    config: { umbral_stock_bajo: 5, respaldo_frecuencia: 'diario' },
+    // `negocio_nombre` va porque es lo primero que ve quien recupera una
+    // bodega: "Bodega El Buen Precio" o "Mi bodega". Sin esto la pantalla de
+    // confirmación no puede dizer de qué bodega se trata.
+    config: {
+      negocio_nombre: 'Bodega El Buen Precio',
+      umbral_stock_bajo: 5,
+      respaldo_frecuencia: 'diario',
+    },
     setup_completado: true,
   }
 

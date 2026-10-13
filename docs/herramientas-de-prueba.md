@@ -90,6 +90,25 @@ Existe porque **los taps a ciegas fallan**: el texto se va al campo que ya
 tiene foco (el primero). El script limpia cada campo con `KEYCODE_DEL` antes
 de escribir y saca las coordenadas de `uiautomator dump` en vez de fijarlas.
 
+## `tools/probar-union.js`
+
+Verifica la unión a una bodega existente contra la base real del dispositivo.
+Ejecuta el mismo SQL que genera `db.js` y comprueba que todo quedó.
+
+```bash
+node tools/probar-union.js /tmp/opencode/datos-prueba.json
+```
+
+16 comprobaciones: conteos de ventas/productos/clientes/fiados, que el
+usuario nuevo tenga clave real, que los del respaldo queden con el marcador
+`sin-clave`, y que la app ya no pida crear el negocio.
+
+Existe porque **el DocumentsUI de Android no responde a `adb shell input
+tap`**: el selector de archivos no se puede automatizar. El camino de la
+pantalla se prueba a mano; la lógica, con este script.
+
+Ver [[2026-10-13-unirse-a-bodega]].
+
 `tools/generar-codigo.js` es del flujo de licencias (ver README) y no tiene
 relación con esto.
 

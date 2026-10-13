@@ -13,6 +13,7 @@ producto (decisiones de negocio, qué hace cada pantalla) vive en el
 | 2026-10-13 | [[2026-10-13-flujo-de-licencia]] | 41 pruebas del flujo de licencia. **Bug real**: pegar el código desde WhatsApp nunca funcionó |
 | 2026-10-13 | [[2026-10-13-prueba-flujo-licencia]] | Licencia probada de punta a punta en pantalla, con herramienta para saltar a cualquier día de la prueba |
 | 2026-10-13 | [[2026-10-13-modelo-de-licencia-nube]] | Propuesta: la licencia pasa de bloquear la venta a bloquear la nube |
+| 2026-10-13 | [[2026-10-13-unirse-a-bodega]] | "Ya tenía una bodega, quiero recuperarla": segundo celular o celular perdido |
 
 ## Referencia
 
@@ -37,6 +38,14 @@ se arregla antes que cualquier función nueva.
 - [ ] Revisar Ajustes: 8 secciones mezclando uso diario con cosas de una vez
 - [ ] Probar con muchas ventas concentradas en un solo día, no en un año
 - [ ] Repetir las mediciones en el Redmi 10 físico (falta cable de datos)
+
+### Hecho, falta en device real
+
+- [ ] Eligir el archivo de respaldo en un teléfono (el DocumentsUI no
+      responde a `adb input tap`, así que se probó a mano en el emulador)
+- [ ] La unión con 20.000 ventas provoca ANR en el emulador con rendering por
+      software. La lógica pasa las 16 comprobaciones; falta ver en un Redmi
+      real si aguanta sin problema.
 
 ### Decisiones abiertas
 
