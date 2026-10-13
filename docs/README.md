@@ -11,6 +11,7 @@ producto (decisiones de negocio, qué hace cada pantalla) vive en el
 | 2026-10-12 | [[2026-10-12-entorno-linux-y-emulador]] | Del Windows al Linux: se reconstruyó el entorno, se creó el emulador de gama media y se destapó un AVD corrupto |
 | 2026-10-13 | [[2026-10-13-medicion-rendimiento]] | Primera medición real con 20.000 ventas: cobrar tarda 12 ms, `getProductos` bajó de 234 a 24 ms |
 | 2026-10-13 | [[2026-10-13-flujo-de-licencia]] | 41 pruebas del flujo de licencia. **Bug real**: pegar el código desde WhatsApp nunca funcionó |
+| 2026-10-13 | [[2026-10-13-prueba-flujo-licencia]] | Licencia probada de punta a punta en pantalla, con herramienta para saltar a cualquier día de la prueba |
 
 ## Referencia
 
@@ -20,8 +21,10 @@ producto (decisiones de negocio, qué hace cada pantalla) vive en el
 
 ## Pendientes
 
-- [ ] Probar el pegado del código desde el portapapeles en un APK real
-- [ ] Probar la pantalla de licencia bloqueada en un build de producción
+- [ ] Probar el pegado del código desde el portapapeles (Android 10+ solo deja
+      leerlo a la app con foco; hace falta device físico o escribir desde la app)
+- [ ] Ver el aviso ámbar (día 24) y el del último día (día 30) en pantalla
+- [ ] Verificar que un código de otro teléfono se rechaza con su mensaje de error
 - [ ] Repetir las mediciones en el Redmi 10 físico (falta cable de datos)
 - [ ] Migración de cuenta entre dispositivos — la app solo tiene Setup inicial
 - [ ] Probar con muchas ventas concentradas en un solo día, no repartidas en un año
@@ -32,6 +35,9 @@ producto (decisiones de negocio, qué hace cada pantalla) vive en el
 
 - [x] Medir el arranque en un build `preview` — 84 ms de JS, ~1 s al proceso
       completo. El 6.4 s era del dev build.
+- [x] Pantalla de licencia bloqueada probada en pantalla, con 20.000 datos:
+      solo se bloquea la venta, productos/clientes/caja siguen abiertos
+- [x] Activación completa: código del vendedor → aceptado → venta desbloqueada
 
 ## Sobre este formato
 

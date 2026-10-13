@@ -93,6 +93,43 @@ de escribir y saca las coordenadas de `uiautomator dump` en vez de fijarlas.
 `tools/generar-codigo.js` es del flujo de licencias (ver README) y no tiene
 relación con esto.
 
+## `tools/licencia-estado.js`
+
+Pone la app en cualquier día de la prueba, o con la licencia activa, en un
+segundo. Para ver la pantalla de licencia hacen falta 30 días.
+
+```bash
+node tools/licencia-estado.js ver            # qué ve la app ahora
+node tools/licencia-estado.js 2XF7M74B 1     # día 1: 30 días
+node tools/licencia-estado.js 2XF7M74B 24    # aviso ámbar
+node tools/licencia-estado.js 2XF7M74B 30    # último día
+node tools/licencia-estado.js 2XF7M74B 31    # bloqueada
+node tools/licencia-estado.js 2XF7M74B activa
+node tools/licencia-estado.js 2XF7M74B nuevo  # reinicia la instalación
+```
+
+Imprime también el **código de activación** válido para esa instalación, para
+no tener que ir al generador del vendedor.
+
+**Solo funciona en el build de desarrollo**: necesita `run-as`, que Android
+solo permite en apps debuggables. En un APK de producción falla, y está bien.
+
+Reiniciar la app después de cada cambio: `adb shell am force-stop com.pos.bodega`
+y volver a abrir con el deep link de Metro.
+
+## Pruebas de licencia (sin emulador)
+
+```bash
+node tools/probar-licencia.js         # 17 casos: cálculo de días
+node tools/probar-codigo-licencia.js  # 24 casos: código y HMAC
+```
+
+Ejecutan **el código real de la app**, no una copia: `getEstadoLicencia` se
+extrae de `db.js` y `licencia.js` se transpila con `expo-crypto` sustituido
+por `node:crypto`. Si alguien cambia la fórmula, la prueba usa el cambio.
+
+Ver [[2026-10-13-flujo-de-licencia]].
+
 ## El cronómetro de la app
 
 `src/utils/cronometro.js` no es un profiler: mide las operaciones que el
