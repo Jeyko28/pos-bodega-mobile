@@ -14,10 +14,16 @@ import { useLetra } from '../context/LetraContext'
 import AvisoHoja from '../components/AvisoHoja'
 import { WS_VENTAS, mensajeSoporte } from '../data/licencia'
 import { abrirWhatsApp } from '../utils/cobranza'
+import { TABLA, limpiar } from '../utils/cronometro'
 import { colors } from '../theme/colors'
 
 export default function ConfiguracionScreen() {
   const { grande, alternar, tx } = useLetra()
+  const [medicion, setMedicion] = useState([])
+  // La tabla se relee al enfocar Ajustes, no con un temporizador: las mediciones
+  // solo cambian cuando el bodeguero está usando la app.
+  useFocusEffect(useCallback(() => { setMedicion(TABLA()) }, []))
+  const limpiarMedicion = useCallback(() => { limpiar(); setMedicion([]) }, [])
   const styles = crearStyles(tx)
   const [config, setConfig] = useState(null)
   const [guardando, setGuardando] = useState(false)
@@ -372,6 +378,36 @@ export default function ConfiguracionScreen() {
         </Text>
         <TouchableOpacity style={styles.botonSecundario} onPress={abrirPrivacidad}>
           <Text style={styles.botonSecundarioTexto}>🔒 Leer política de privacidad</Text>
+        </TouchableOpacity>
+      </View>
+
+      <View style={styles.tarjeta}>
+        <Text style={styles.tituloSeccion}>⚡ Velocidad</Text>
+        <Text style={styles.textoAyuda}>
+          Cuánto tarda la app en las operaciones que repites todo el día. Sirve para
+          detectar si algo se está vuelta lento con el tiempo.
+        </Text>
+        {medicion.length === 0 ? (
+          <Text style={[styles.textoAyuda, { marginTop: 8 }]}>
+            Todavía no hay mediciones. Usa la app un rato y vuelve acá.
+          </Text>
+        ) : (
+          <View style={{ marginTop: 10 }}>
+            {medicion.map(f => (
+              <View key={f.nombre} style={{ flexDirection: 'row', justifyContent: 'space-between', paddingVertical: 6, borderTopWidth: 1, borderTopColor: colors.border }}>
+                <Text style={{ color: colors.text, fontSize: 13, flex: 1 }}>{f.nombre}</Text>
+                <Text style={{ color: colors.textMuted, fontSize: 13, fontWeight: '700' }}>
+                  {f.promedio.toFixed(1)} ms
+                  <Text style={{ color: colors.textMuted, fontWeight: '400', fontSize: 11 }}>
+                    {'  '}prom · {f.peor.toFixed(0)} máx · {f.veces}×
+                  </Text>
+                </Text>
+              </View>
+            ))}
+          </View>
+        )}
+        <TouchableOpacity style={styles.botonSecundario} onPress={limpiarMedicion}>
+          <Text style={styles.botonSecundarioTexto}>Borrar mediciones</Text>
         </TouchableOpacity>
       </View>
 

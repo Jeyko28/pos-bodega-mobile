@@ -3,6 +3,7 @@ import * as Crypto from 'expo-crypto'
 import AsyncStorage from '@react-native-async-storage/async-storage'
 import { normalizar as normalizarTexto } from '../utils/texto'
 import { DIAS_PRUEBA, AVISO_PRUEBA_DESDE, generarIdInstalacion, verificarCodigo, verificarCodigoReset } from './licencia'
+import cronometro from '../utils/cronometro'
 
 // Antes todos los datos vivían en un solo JSON de AsyncStorage que se reescribía
 // entero en cada venta. Con miles de ventas eso se vuelve lento y arriesgado, así
@@ -459,8 +460,22 @@ async function addUsuario({ nombre, username, password, rol }) {
 }
 
 // ─── PRODUCTOS ──────────────────────────────────────────────────────
+// Trae solo las columnas que las pantallas leen de verdad. `costo` y
+// `creado_en` quedan afuera: nadie las pide en la grilla ni en la ficha, y
+// con 500 productos pagar dos columnas que no se usan se nota.
+//
+// El orden va en SQL y no en JS a propósito: `localeCompare` sobre 500
+// nombres en cada carga es trabajo de JS, y esta función se llama cada vez
+// que vuelve a Vender. `COLLATE NOCASE` ordena sin distinguir mayúsculas
+// (que es como compara `localeCompare` con nombres de producto) y lo hace
+// SQLite, que para eso es más rápido que un sort en memoria.
 function getProductos() {
-  return sql.getAllSync('SELECT * FROM productos').sort((a, b) => a.nombre.localeCompare(b.nombre))
+  return cronometro('db.getProductos', () => sql.getAllSync(`
+    SELECT id, nombre, precio, stock, codigo, categoria, tipo_venta, unidad,
+           bulto_unidades, bulto_nombre, bulto_codigo
+    FROM productos
+    ORDER BY nombre COLLATE NOCASE
+  `))
 }
 
 // El costo es opcional: una bodega no lo sabe de todos sus productos, y exigirlo
@@ -625,19 +640,36 @@ async function asignarCodigo(productoId, codigo) {
 // Los que más se venden, para tenerlos a un toque en hora punta. Se miden por
 // número de veces vendidos y no por unidades: cinco ventas de un pan pesan más
 // que una venta de 20 kilos de arroz a la hora de decidir qué poner a la mano.
+//
+// Esta consulta es la más pesada de la app: recorre las líneas de detalle de
+// las ventas de los últimos 30 días para devolver 12 filas. Con 90.000 líneas
+// estaba en 147 ms.
+//
+// El cambio es `p.*` → lista corta de columnas. Traía `costo` y `creado_en`
+// de cada uno de los 500 productos que sobreviven al GROUP BY, y la grilla no
+// los usa nunca.
+//
+// La fecha NO se puede filtrar por `detalle_ventas`: esa tabla no tiene
+// columna de fecha, solo `venta_id`. El rango se resuelve contra `ventas`, que
+// es lo que obliga a unir antes de filtrar. Agregar `fecha` a `detalle_ventas`
+// lo resolvería, pero es una columna duplicada que puede quedar desfasada de
+// su venta; no vale la pena mientras el tiempo esté en presupuesto.
 function getMasVendidos(limite = 12, dias = 30) {
-  const desde = new Date()
-  desde.setDate(desde.getDate() - dias)
-  return sql.getAllSync(`
-    SELECT p.*, COUNT(d.id) AS veces
-    FROM detalle_ventas d
-    JOIN ventas v ON v.id = d.venta_id
-    JOIN productos p ON p.id = d.producto_id
-    WHERE v.fecha >= ? AND v.anulada = 0
-    GROUP BY p.id
-    ORDER BY veces DESC
-    LIMIT ?
-  `, desde.toISOString(), limite)
+  return cronometro('db.getMasVendidos', () => {
+    const desde = new Date()
+    desde.setDate(desde.getDate() - dias)
+    return sql.getAllSync(`
+      SELECT p.id, p.nombre, p.precio, p.stock, p.codigo, p.categoria,
+             p.tipo_venta, p.unidad, COUNT(d.id) AS veces
+      FROM detalle_ventas d
+      JOIN ventas v ON v.id = d.venta_id
+      JOIN productos p ON p.id = d.producto_id
+      WHERE v.fecha >= ? AND v.anulada = 0
+      GROUP BY p.id
+      ORDER BY veces DESC
+      LIMIT ?
+    `, desde.toISOString(), limite)
+  })
 }
 
 function getProductosBajoStock() {
@@ -670,7 +702,9 @@ const SQL_CLIENTES = `
 `
 
 function getClientes() {
-  return sql.getAllSync(SQL_CLIENTES).sort((a, b) => a.nombre.localeCompare(b.nombre))
+  return cronometro('db.getClientes', () =>
+    sql.getAllSync(SQL_CLIENTES).sort((a, b) => a.nombre.localeCompare(b.nombre))
+  )
 }
 
 async function addCliente({ nombre, telefono, referencia, dni_ruc }) {
@@ -805,6 +839,11 @@ function getFiadosAntiguos(dias = 15) {
 
 // ─── VENTAS ─────────────────────────────────────────────────────────
 async function realizarVenta(items, montoRecibido, metodoPago = 'Efectivo', descuento = 0, tipoDescuento = 'ninguno', usuarioId = null, clienteId = null, esFiado = false, compradorNombre = null, compradorDniRuc = null) {
+  // El cobro es la operación que el bodeguero repite cientos de veces al día:
+  // es la que tiene que ser instantánea. Se mide entera, desde que entra hasta
+  // que la transacción queda confirmada.
+  const _t = cronometro('db.realizarVenta')
+  try {
   // Segunda capa del bloqueo (la primera es la pestaña Vender): si alguien
   // llega hasta acá con la prueba vencida, la venta no se registra.
   if (getEstadoLicencia().bloqueado) {
@@ -868,6 +907,7 @@ async function realizarVenta(items, montoRecibido, metodoPago = 'Efectivo', desc
     metodoPago: esFiado ? 'Fiado' : metodoPago,
     fecha,
   }
+  } finally { _t() }
 }
 
 // ─── CORREGIR LO YA REGISTRADO ──────────────────────────────────────

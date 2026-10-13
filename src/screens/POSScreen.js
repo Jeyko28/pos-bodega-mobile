@@ -1,8 +1,9 @@
-import React, { useState, useEffect, useCallback, useRef } from 'react'
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { View, Text, TextInput, TouchableOpacity, FlatList, StyleSheet, Modal, ScrollView, ActivityIndicator, Pressable, Animated, Keyboard } from 'react-native'
 import { useFocusEffect, useNavigation } from '@react-navigation/native'
 import { Ionicons } from '@expo/vector-icons'
 import db from '../data/db'
+import cronometro from '../utils/cronometro'
 import { useSesion } from '../context/SesionContext'
 import { colors } from '../theme/colors'
 import { CATEGORIAS_BASE, iconoCategoria } from '../data/categorias'
@@ -114,6 +115,10 @@ export default function POSScreen() {
   useFocusEffect(useCallback(() => { cargar() }, []))
 
   async function cargar() {
+    // Volver a esta pestaña es lo que más se repite en el día: el bodeguero
+    // cobra, mira el carrito del otro, cobra otra vez. Se mide el bloque
+    // completo para saber cuánto de esa vuelta es nuestro y cuánto es SQLite.
+    const _t = cronometro('POS.cargar')
     setProductos(db.getProductos())
     setClientes(db.getClientes())
     setLicencia(db.getEstadoLicencia())
@@ -124,6 +129,7 @@ export default function POSScreen() {
     // delante en hora punta. Sin historial no hay nada que mostrar y se cae
     // sola a la lista completa.
     if (top.length && vistaRapida === null) setVistaRapida(true)
+    _t()
   }
 
   const carritoActivo = carritos.find(c => c.id === carritoActivoId) || carritos[0]
@@ -389,11 +395,20 @@ export default function POSScreen() {
   }
 
   const total = carritoActivo.items.reduce((s, i) => s + i.subtotal, 0)
-  const productosFiltrados = productos
-    .filter(p => {
-      return coincide(p.nombre, busqueda) || String(p.codigo || '').includes(busqueda.trim())
-    })
-    .filter(p => !categoriaFiltro || p.categoria === categoriaFiltro)
+  // Memorizado a propósito: sin esto, cada tecla en el buscador y cada +/− en
+  // el carrito re-filtran la lista completa de productos dentro del render.
+  // Con 500 productos son 500 comparaciones por render, y el render dispara
+  // varios por segundo mientras se cobra.
+  const productosFiltrados = useMemo(() => {
+    const _t = cronometro('POS.filtrarProductos')
+    const salida = productos
+      .filter(p => {
+        return coincide(p.nombre, busqueda) || String(p.codigo || '').includes(busqueda.trim())
+      })
+      .filter(p => !categoriaFiltro || p.categoria === categoriaFiltro)
+    _t()
+    return salida
+  }, [productos, busqueda, categoriaFiltro])
 
   // Solo se ofrecen como filtro las categorías que hoy tienen productos — un chip
   // que no filtra nada solo estorba en la pantalla más usada del día. Las categorías

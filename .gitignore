@@ -39,3 +39,7 @@ yarn-error.*
 # generated native folders
 /ios
 /android
+
+# Datos de prueba generados (ver tools/generar-datos-prueba.js)
+datos.json
+datos-*.json

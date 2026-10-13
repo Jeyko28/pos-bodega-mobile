@@ -10,6 +10,7 @@ import db from './src/data/db'
 import { respaldarSiToca } from './src/data/respaldo'
 import { SesionContext } from './src/context/SesionContext'
 import { LetraProvider } from './src/context/LetraContext'
+import { marcarArranqueListo } from './src/utils/cronometro'
 import SetupScreen from './src/screens/SetupScreen'
 import OnboardingScreen from './src/screens/OnboardingScreen'
 import LoginScreen, { ULTIMO_USUARIO_KEY } from './src/screens/LoginScreen'
@@ -37,6 +38,7 @@ export default function App() {
       if (!db.isSetupCompletado()) {
         setSetupPendiente(true)
         setCargando(false)
+        marcarArranqueListo()
         return
       }
       const guardado = await AsyncStorage.getItem(SESION_KEY)
@@ -49,6 +51,7 @@ export default function App() {
     // silencio, y su estado se revisa en Ajustes.
     respaldarSiToca().catch(() => {})
     setCargando(false)
+    marcarArranqueListo()
   }
 
   async function handleSetupCompleto(usuarioData) {
