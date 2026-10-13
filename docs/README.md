@@ -14,6 +14,7 @@ producto (decisiones de negocio, qué hace cada pantalla) vive en el
 | 2026-10-13 | [[2026-10-13-prueba-flujo-licencia]] | Licencia probada de punta a punta en pantalla, con herramienta para saltar a cualquier día de la prueba |
 | 2026-10-13 | [[2026-10-13-modelo-de-licencia-nube]] | Propuesta: la licencia pasa de bloquear la venta a bloquear la nube |
 | 2026-10-13 | [[2026-10-13-unirse-a-bodega]] | "Ya tenía una bodega, quiero recuperarla": segundo celular o celular perdido |
+| 2026-10-13 | [[2026-10-13-arquitectura-sincronizacion]] | Diseño de sincronización entre dispositivos: ids globales, stock derivado, buzones por dispositivo |
 
 ## Referencia
 
@@ -38,6 +39,20 @@ se arregla antes que cualquier función nueva.
 - [ ] Revisar Ajustes: 8 secciones mezclando uso diario con cosas de una vez
 - [ ] Probar con muchas ventas concentradas en un solo día, no en un año
 - [ ] Repetir las mediciones en el Redmi 10 físico (falta cable de datos)
+
+### Sincronización
+
+Diseño completo en [[2026-10-13-arquitectura-sincronizacion]]. Decidido:
+al abrir/cerrar + cada 30 min; ventas y fiados nunca se pierden;
+productos y clientes gana el último; transporte agnóstico (Drive hoy).
+
+- [ ] Paso 1: `g_id` global en ventas, abonos e ingresos
+- [ ] Paso 2: fusionar ventas sin perder
+- [ ] Paso 3: stock derivado del historial (hoy se acumula)
+- [ ] Paso 4: `modificado_en` en productos y clientes
+- [ ] Pasos 5-6: buzones por dispositivo + proveedor agnóstico
+
+Los pasos 1-4 no necesitan nube ni internet y ya sirven.
 
 ### Hecho, falta en device real
 

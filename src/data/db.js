@@ -159,6 +159,22 @@ CREATE TABLE IF NOT EXISTS config (
   clave TEXT PRIMARY KEY,
   valor TEXT
 );
+
+-- Las columnas g_id y modificado_en NO van aquí: se agregan en
+-- agregarColumnasFaltantes(), que es donde viven las migraciones. Puestas en
+-- el ESQUEMA, el CREATE TABLE de una base nueva las crearía, pero la de una
+-- base vieja no, y el esquema se ejecuta en los dos casos.
+`
+// Índices de sincronización: se crean aparte porque dependen de columnas que
+// pueden no existir todavía (ver arriba). Ver
+// docs/2026-10-13-arquitectura-sincronizacion.md
+const INDICES_SYNC = `
+CREATE UNIQUE INDEX IF NOT EXISTS idx_ventas_gid ON ventas(g_id) WHERE g_id IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_pagos_gid ON pagos_fiado(g_id) WHERE g_id IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_ingresos_gid ON ingresos(g_id) WHERE g_id IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_fiado_gid ON fiado(g_id) WHERE g_id IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_productos_mod ON productos(modificado_en);
+CREATE INDEX IF NOT EXISTS idx_clientes_mod ON clientes(modificado_en);
 `
 
 // ─── CONFIG (tabla clave/valor, se expone como un objeto plano) ──────
@@ -257,6 +273,17 @@ async function activarLicencia(codigo) {
 const COLUMNAS_NUEVAS = [
   ['ventas', 'anulada', 'INTEGER NOT NULL DEFAULT 0'],
   ['ventas', 'anulada_en', 'TEXT'],
+  // Identificadores globales: lo que permite fusionar dos celulares sin
+  // perder una venta (ver docs/2026-10-13-arquitectura-sincronizacion.md).
+  // Las bodegas que ya tienen ventas reciben un g_id derivado de su id local,
+  // que es único dentro de esta base — no choca con nada porque cada
+  // dispositivo genera los suyos con random.
+  ['ventas', 'g_id', 'TEXT'],
+  ['pagos_fiado', 'g_id', 'TEXT'],
+  ['ingresos', 'g_id', 'TEXT'],
+  ['fiado', 'g_id', 'TEXT'],
+  ['productos', 'modificado_en', 'TEXT'],
+  ['clientes', 'modificado_en', 'TEXT'],
   ['fiado', 'venta_id', 'INTEGER'],
   ['pagos_fiado', 'anulado', 'INTEGER NOT NULL DEFAULT 0'],
   ['productos', 'costo', 'REAL'],
@@ -283,9 +310,41 @@ async function initDB() {
   sql = SQLite.openDatabaseSync(DB_NAME)
   sql.execSync(ESQUEMA)
   agregarColumnasFaltantes()
+  try { sql.execSync(INDICES_SYNC) } catch { /* base vieja sin las columnas */ }
   asegurarLicencia()
+  completarBackfillSync()
   if (!leerConfig('migrado_desde_asyncstorage', false)) {
     await migrarDesdeAsyncStorage()
+  }
+}
+
+// Las ventas que ya existían antes de los g_id no lo tienen. Hay que
+// backfillearlas o la primera vez que se sincronice dos celulares se van a
+// confundir dos ventas distintas que acabarán con g_id NULL.
+//
+// El g_id derivado usa el id local de esta base, que es único dentro de ella,
+// así que no puede chocar con los que genera otro dispositivo (llevan random).
+function completarBackfillSync() {
+  try {
+    // Un solo paso: se marca con una clave en config para no re-escribir toda
+    // la tabla en cada arranque.
+    if (leerConfig('sync_backfill_hecho', false)) return
+    const tablas = [
+      ['ventas', 'v'], ['pagos_fiado', 'a'], ['ingresos', 'i'], ['fiado', 'f'],
+    ]
+    for (const [tabla, prefijo] of tablas) {
+      const filas = sql.getAllSync(`SELECT id FROM ${tabla} WHERE g_id IS NULL`)
+      for (const f of filas) {
+        sql.runSync(`UPDATE ${tabla} SET g_id = ? WHERE id = ?`, `${prefijo}_l${f.id}${idDispositivo()}`, f.id)
+      }
+    }
+    // modificado_en ausente = "nunca editado", que equivale a la fecha más
+    // vieja posible: gana el que sí se editó.
+    sql.runSync('UPDATE productos SET modificado_en = ? WHERE modificado_en IS NULL', new Date(0).toISOString())
+    sql.runSync('UPDATE clientes SET modificado_en = ? WHERE modificado_en IS NULL', new Date(0).toISOString())
+    escribirConfig('sync_backfill_hecho', true)
+  } catch {
+    // Si falla, se reintenta en el próximo arranque: es idempotente.
   }
 }
 
@@ -355,6 +414,43 @@ const PREFIJO_HASH = 'sha256$'
 
 function generarSalt() {
   return Array.from(Crypto.getRandomBytes(16)).map(b => b.toString(16).padStart(2, '0')).join('')
+}
+
+// ─── IDENTIFICADORES GLOBALES ───────────────────────────────────────
+//
+// El `id` de cada tabla es un autoincrement LOCAL. Con dos celulares vendiendo
+// offline, los dos crean "venta 500" y son ventas distintas: al sincronizar no
+// hay forma de saber si es la misma o no, y tratar una como repetida pierde
+// plata que entró al cajón.
+//
+// Por eso cada venta, abono e ingreso lleva además un `g_id`, que es único en
+// el mundo: timestamp en base36 + 8 bytes aleatorios + el id de este
+// dispositivo. Si dos celulares generan un `g_id` al mismo milisegundo, los
+// bytes aleatorios los separan. La regla de fusión es una sola línea: si ya
+// tengo esa `g_id`, es la misma; si no, es nueva y se suma.
+//
+// Ver docs/2026-10-13-arquitectura-sincronizacion.md
+
+// Identificador de este teléfono, para que dosplicate que se generan en el
+// mismo instante en equipos distintos nunca coincidan.
+let _idDispositivo = null
+function idDispositivo() {
+  if (_idDispositivo) return _idDispositivo
+  _idDispositivo = (leerConfig('sync_dispositivo_id', null) || '').slice(0, 8)
+  if (!_idDispositivo) {
+    _idDispositivo = Array.from(Crypto.getRandomBytes(4)).map(b => b.toString(16).padStart(2, '0')).join('')
+    escribirConfig('sync_dispositivo_id', _idDispositivo)
+  }
+  return _idDispositivo
+}
+
+// `prefijo` dice qué es: 'v' venta, 'a' abono de fiado, 'i' ingreso de
+// mercadería, 'p' pago, 'f' fiado. Sirve para que al leer una sincronización
+// se pueda distinguir de un vistazo qué es cada cosa.
+function generarGId(prefijo) {
+  const ts = Date.now().toString(36)
+  const rnd = Array.from(Crypto.getRandomBytes(6)).map(b => b.toString(36).padStart(2, '0')).join('').slice(0, 8)
+  return `${prefijo}_${ts}${rnd}${idDispositivo()}`
 }
 
 async function hashearPassword(password, salt = generarSalt()) {
@@ -648,7 +744,7 @@ async function ingresarMercaderia(entradas, usuarioId = null) {
   let ingresoId = null
 
   sql.withTransactionSync(() => {
-    const r = sql.runSync('INSERT INTO ingresos (fecha, usuario_id) VALUES (?, ?)', new Date().toISOString(), usuarioId)
+    const r = sql.runSync('INSERT INTO ingresos (g_id, fecha, usuario_id) VALUES (?, ?, ?)', generarGId('i'), new Date().toISOString(), usuarioId)
     ingresoId = r.lastInsertRowId
 
     entradas.forEach(({ id, nombre, cantidad, costo }) => {
@@ -863,8 +959,8 @@ function insertarFiado({ clienteId, monto, concepto, usuarioId, ventaId = null }
   const fecha = new Date().toISOString()
   const m = parseFloat(monto)
   const r = sql.runSync(
-    'INSERT INTO fiado (cliente_id, monto_original, saldo, concepto, usuario_id, estado, venta_id, fecha) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
-    clienteId, m, m, concepto || 'Compra al crédito', usuarioId || null, 'pendiente', ventaId, fecha)
+    'INSERT INTO fiado (g_id, cliente_id, monto_original, saldo, concepto, usuario_id, estado, venta_id, fecha) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
+    generarGId('f'), clienteId, m, m, concepto || 'Compra al crédito', usuarioId || null, 'pendiente', ventaId, fecha)
   return { id: r.lastInsertRowId, cliente_id: clienteId, monto_original: m, saldo: m, concepto, usuario_id: usuarioId || null, estado: 'pendiente', venta_id: ventaId, fecha }
 }
 
@@ -896,8 +992,8 @@ async function abonarACliente({ clienteId, monto, metodoPago = 'Efectivo', usuar
       const parte = redondear(Math.min(restante, f.saldo))
       const saldoNuevo = redondear(f.saldo - parte)
       sql.runSync(
-        'INSERT INTO pagos_fiado (fiado_id, monto, metodo_pago, usuario_id, fecha) VALUES (?, ?, ?, ?, ?)',
-        f.id, parte, metodoPago, usuarioId, fecha)
+        'INSERT INTO pagos_fiado (g_id, fiado_id, monto, metodo_pago, usuario_id, fecha) VALUES (?, ?, ?, ?, ?, ?)',
+        generarGId('a'), f.id, parte, metodoPago, usuarioId, fecha)
       sql.runSync('UPDATE fiado SET saldo = ?, estado = ? WHERE id = ?',
         saldoNuevo, saldoNuevo === 0 ? 'pagado' : 'pendiente', f.id)
       restante = redondear(restante - parte)
@@ -965,8 +1061,8 @@ async function realizarVenta(items, montoRecibido, metodoPago = 'Efectivo', desc
   // stock ya descontado.
   sql.withTransactionSync(() => {
     const r = sql.runSync(
-      'INSERT INTO ventas (total, subtotal_bruto, descuento, tipo_descuento, monto_recibido, vuelto, metodo_pago, usuario_id, cliente_id, es_fiado, comprador_nombre, comprador_dni_ruc, fecha) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
-      total, subtotalBruto, descuentoMonto, tipoDescuento, esFiado ? 0 : montoRecibido, vuelto,
+      'INSERT INTO ventas (g_id, total, subtotal_bruto, descuento, tipo_descuento, monto_recibido, vuelto, metodo_pago, usuario_id, cliente_id, es_fiado, comprador_nombre, comprador_dni_ruc, fecha) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+      generarGId('v'), total, subtotalBruto, descuentoMonto, tipoDescuento, esFiado ? 0 : montoRecibido, vuelto,
       esFiado ? 'Fiado' : metodoPago, usuarioId, clienteId || null, esFiado ? 1 : 0,
       nombreComprador, dniRucComprador, fecha)
     ventaId = r.lastInsertRowId
