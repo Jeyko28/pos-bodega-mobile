@@ -37,10 +37,28 @@ function normalizarCodigo(codigo) {
     .replace(/[^0-9A-Z]/g, '')
 }
 
-// Saca un código válido de cualquier texto (ej: lo copiado del WhatsApp
-// con espacios o guiones de más). Devuelve null si no hay 16 letras.
+// Saca un código válido de cualquier texto.
+//
+// El caso real: la bodeguera copia del WhatsApp, y lo que llega al portapapeles
+// es el mensaje entero ("Hola! Tu código es ABCD-1234-EFGH-IJKL — gracias"),
+// no solo el código. Exigir que el texto limpio mida exactamente 16 letras
+// hacía que ese caso NUNCA funcionara, que es justo el que más importa.
+//
+// Primero se busca el bloque con guiones (ABCD-1234-EFGH-IJKL), que es como
+// el vendedor lo escribe siempre. Si no está, se usa el texto limpio entero,
+// que cubre el caso de que la persona copie solo el código sin guiones.
+const RE_CODIGO = /\b[0-9A-HJKMNP-TV-Z]{4}(?:-[0-9A-HJKMNP-TV-Z]{4}){3}\b/g
+
 export function extraerCodigo(texto) {
-  const limpio = normalizarCodigo(texto)
+  const crudo = String(texto || '')
+  const encontrados = crudo.toUpperCase().match(RE_CODIGO)
+  if (encontrados && encontrados.length === 1) {
+    return normalizarCodigo(encontrados[0])
+  }
+  // Más de un bloque con forma de código: no se adivina cuál quiere.
+  if (encontrados && encontrados.length > 1) return null
+
+  const limpio = normalizarCodigo(crudo)
   return limpio.length === 16 ? limpio : null
 }
 
@@ -131,9 +149,13 @@ export async function generarCodigoPara(idInstalacion) {
 }
 
 export async function verificarCodigo(idInstalacion, codigo) {
-  const limpio = normalizarCodigo(codigo)
-  if (limpio.length !== 16 || !idInstalacion) return false
-  const esperado = normalizarCodigo(await generarCodigoPara(idInstalacion))
+  // `extraerCodigo` y no `normalizarCodigo` a secas: el código suele llegar
+  // pegado dentro de un mensaje ("Hola, tu código es ABCD-1234..."), y exigir
+  // que el texto sea exactamente 16 letras rechazaba una entrada válida. La
+  // bodeguera copia del WhatsApp, no reescribe a mano.
+  const limpio = extraerCodigo(codigo)
+  if (!limpio || !idInstalacion) return false
+  const esperado = extraerCodigo(await generarCodigoPara(idInstalacion))
   return compararLimpios(limpio, esperado)
 }
 
@@ -152,9 +174,11 @@ export async function generarCodigoResetPara(idInstalacion) {
 }
 
 export async function verificarCodigoReset(idInstalacion, codigo) {
-  const limpio = normalizarCodigo(codigo)
-  if (limpio.length !== 16 || !idInstalacion) return false
-  const esperado = normalizarCodigo(await generarCodigoResetPara(idInstalacion))
+  // Mismo criterio que verificarCodigo: el código puede venir pegado dentro
+  // de un mensaje de WhatsApp, no tipeado limpio.
+  const limpio = extraerCodigo(codigo)
+  if (!limpio || !idInstalacion) return false
+  const esperado = extraerCodigo(await generarCodigoResetPara(idInstalacion))
   return compararLimpios(limpio, esperado)
 }
 

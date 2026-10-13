@@ -23,8 +23,7 @@
         "monochromeImage": "./assets/android-icon-monochrome.png"
       },
       "permissions": [
-        "android.permission.CAMERA",
-        "android.permission.RECORD_AUDIO"
+        "android.permission.CAMERA"
       ],
       "versionCode": 2
     },
@@ -36,7 +35,9 @@
       [
         "expo-camera",
         {
-          "cameraPermission": "Necesitamos la cámara para escanear el código de barras de tus productos."
+          "cameraPermission": "Necesitamos la cámara para escanear el código de barras de tus productos.",
+          "recordAudioAndroid": false,
+          "barcodeScannerEnabled": true
         }
       ],
       "expo-sqlite",

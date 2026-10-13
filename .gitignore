@@ -43,3 +43,6 @@ yarn-error.*
 # Datos de prueba generados (ver tools/generar-datos-prueba.js)
 datos.json
 datos-*.json
+
+# Configuracion local de Obsidian (es por maquina, no del proyecto)
+docs/.obsidian/
