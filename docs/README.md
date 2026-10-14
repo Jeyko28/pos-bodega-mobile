@@ -15,6 +15,7 @@ producto (decisiones de negocio, qué hace cada pantalla) vive en el
 | 2026-10-13 | [[2026-10-13-modelo-de-licencia-nube]] | Propuesta: la licencia pasa de bloquear la venta a bloquear la nube |
 | 2026-10-13 | [[2026-10-13-unirse-a-bodega]] | "Ya tenía una bodega, quiero recuperarla": segundo celular o celular perdido |
 | 2026-10-13 | [[2026-10-13-arquitectura-sincronizacion]] | Diseño de sincronización entre dispositivos: ids globales, stock derivado, buzones por dispositivo |
+| 2026-10-14 | [[2026-10-14-stock-derivado]] | El stock se recalcula desde el historial. Fusionar dos celulares da el mismo número que un celular único |
 
 ## Referencia
 
@@ -46,10 +47,14 @@ Diseño completo en [[2026-10-13-arquitectura-sincronizacion]]. Decidido:
 al abrir/cerrar + cada 30 min; ventas y fiados nunca se pierden;
 productos y clientes gana el último; transporte agnóstico (Drive hoy).
 
-- [ ] Paso 1: `g_id` global en ventas, abonos e ingresos
-- [ ] Paso 2: fusionar ventas sin perder
-- [ ] Paso 3: stock derivado del historial (hoy se acumula)
-- [ ] Paso 4: `modificado_en` en productos y clientes
+- [x] Paso 1: `g_id` global en ventas, abonos, ingresos y fiados
+- [ ] Paso 2: la función de fusión en `db.js` (la lógica ya pasa 17 pruebas
+      en `probar-fusion.js`)
+- [x] Paso 3: stock derivado del historial — `src/data/stock.js`, verificado
+      contra datos reales (0 incoherencias en 120 productos, y correcto
+      después de una venta en pantalla)
+- [ ] Paso 4: la regla "gana el último" con `modificado_en` (las columnas ya
+      existen)
 - [ ] Pasos 5-6: buzones por dispositivo + proveedor agnóstico
 
 Los pasos 1-4 no necesitan nube ni internet y ya sirven.

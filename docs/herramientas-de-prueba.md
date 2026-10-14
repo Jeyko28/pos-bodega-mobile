@@ -136,6 +136,22 @@ solo permite en apps debuggables. En un APK de producción falla, y está bien.
 Reiniciar la app después de cada cambio: `adb shell am force-stop com.pos.bodega`
 y volver a abrir con el deep link de Metro.
 
+## `tools/probar-fusion.js`
+
+Simula dos celulares vendiendo offline y comprueba que fusionar no pierde
+ventas ni descuadra el stock. 17 casos, sin tocar la base real: es un modelo
+del algoritmo, y la migración ya se probó aparte.
+
+```bash
+node tools/probar-fusion.js
+```
+
+Lo que demuestra: los ids locales chocan (los dos tienen venta `id=1`), y aun
+así **el stock fusionado es idéntico al de un celular único que vendió todo**.
+También que fusionar dos veces no cambia nada.
+
+Ver [[2026-10-14-stock-derivado]].
+
 ## Pruebas de licencia (sin emulador)
 
 ```bash

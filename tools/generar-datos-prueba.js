@@ -93,8 +93,12 @@ function main() {
       precio,
       costo,
       // El stock se deja a veces negativo a propósito: es lo que pasa en la
-      // realidad y hay que verlo en pantalla.
-      stock: Math.round(r() * 120) - 15,
+      // Stock en 0, como los crea la app (ver db.js addProducto). El stock
+      // llega después por ingresos registrados, no por un número puesto a
+      // mano: si se inventa un stock inicial sin ingreso que lo justifique, el
+      // stock derivado (Σ ingresos − Σ ventas) no lo puede reconstruir y da
+      // números negativos que no existen en una bodega real.
+      stock: 0,
       codigo: usados.size % 3 === 0 ? `775${String(1000000 + i * 7)}` : null,
       tipo_venta: granel ? 'granel' : 'unidad',
       unidad: granel ? 'kg' : 'unidad',
@@ -125,7 +129,6 @@ function main() {
   const ventas = []
   const detalle = []
   let ventaId = 0
-  const porDia = new Array(DIAS).fill(0)
 
   for (let i = 0; i < nVentas; i++) {
     // Día con peso hacia hoy.
@@ -135,7 +138,6 @@ function main() {
     // Hora con pico en la mañana y la tarde, como una bodega de barrio.
     const hora = r() < 0.35 ? 7 + r() * 3 : r() < 0.75 ? 10 + r() * 5 : 16 + r() * 5
     const fecha = new Date(diaMs - (24 - hora) * 3600000).toISOString()
-    porDia[dia]++
 
     ventaId++
     const esFiado = r() < 0.12
@@ -177,6 +179,7 @@ function main() {
 
     ventas.push({
       id: ventaId,
+      g_id: `v_prueba${ventaId}`,
       total,
       subtotal_bruto: subtotal,
       descuento,
@@ -193,6 +196,54 @@ function main() {
       anulada: 0,
     })
     detalle.push(...lineas)
+  }
+
+  // ─── Ingresos de mercadería ────────────────────────────────────────
+  // El stock entra por acá, igual que en la app (el producto nace en 0).
+  //
+  // La cantidad no se tira a ojo: se calcula a partir de lo que realmente se
+  // vendió, para que el stock derivado quede en un rango creíble — ni todos en
+  // negativo, ni todos con 300 unidades. Se entra un 35% más de lo que sale,
+  // que es como funciona una bodega: se repone con margen.
+  const vendidoPorProducto = new Map()
+  for (const dv of detalle) {
+    if (dv.producto_id === null) continue
+    vendidoPorProducto.set(dv.producto_id, (vendidoPorProducto.get(dv.producto_id) || 0) + dv.cantidad)
+  }
+
+  const ingresos = []
+  const detalle_ingresos = []
+  let ingresoId = 0
+  const nIngresos = Math.max(3, Math.round(nProductos / 10))
+  for (let g = 0; g < nIngresos; g++) {
+    ingresoId++
+    const diasAtras = Math.floor(r() * DIAS)
+    ingresos.push({
+      g_id: `i_prueba${ingresoId}`,
+      id: ingresoId,
+      fecha: new Date(ahora - diasAtras * msPorDia).toISOString(),
+      usuario_id: 1,
+      deshecho: 0,
+    })
+    // Cada ingreso cubre un grupo de productos.
+    const desde = Math.floor((g / nIngresos) * nProductos)
+    const hasta = Math.floor(((g + 1) / nIngresos) * nProductos)
+    for (let k = desde; k < hasta && k < nProductos; k++) {
+      const p = productos[k]
+      const vendido = vendidoPorProducto.get(p.id) || 0
+      // Se repone lo vendido + un margen, y algo de piso para que los
+      // productos que casi no se venden no queden en cero (que en pantalla
+      // sale como "Figura sin stock").
+      const cantidad = Math.max(Math.round(vendido * 1.35 + 10 + r() * 25), 5)
+      detalle_ingresos.push({
+        g_id: `di_prueba${detalle_ingresos.length + 1}`,
+        id: detalle_ingresos.length + 1,
+        ingreso_id: ingresoId,
+        producto_id: p.id,
+        nombre_producto: p.nombre,
+        cantidad,
+      })
+    }
   }
 
   // ─── Fiado y abonos ───────────────────────────────────────────────
@@ -239,10 +290,30 @@ function main() {
     }
   }
 
+  // El stock que se guarda en cada producto es el derivado del historial, que
+  // es el mismo cálculo que hace src/data/stock.js. Se calcula acá para que
+  // el JSON quede coherente: si el stock guardado no se corresponde con los
+  // ingresos y las ventas, las pruebas del stock derivado dan números raros.
+  const entradasPorProducto = new Map()
+  for (const di of detalle_ingresos) {
+    entradasPorProducto.set(di.producto_id, (entradasPorProducto.get(di.producto_id) || 0) + di.cantidad)
+  }
+  const salidasPorProducto = new Map()
+  for (const dv of detalle) {
+    if (dv.producto_id === null) continue
+    salidasPorProducto.set(dv.producto_id, (salidasPorProducto.get(dv.producto_id) || 0) + dv.cantidad)
+  }
+  for (const p of productos) {
+    const stock = (entradasPorProducto.get(p.id) || 0) - (salidasPorProducto.get(p.id) || 0)
+    p.stock = Math.round(stock * 1000) / 1000
+  }
+
   const salida = {
     productos,
     ventas,
     detalle_ventas: detalle,
+    ingresos,
+    detalle_ingresos,
     usuarios: [{ id: 1, nombre: 'Dueño', username: 'admin', rol: 'admin', activo: 1, creado_en: new Date(ahora - DIAS * msPorDia).toISOString() }],
     clientes,
     fiado,
@@ -250,7 +321,7 @@ function main() {
     categorias_custom: CATEGORIAS.slice(0, 3).map((c, i) => ({ id: c.toLowerCase(), icon: ['📦', '🧃', '🍞'][i] })),
     // `negocio_nombre` va porque es lo primero que ve quien recupera una
     // bodega: "Bodega El Buen Precio" o "Mi bodega". Sin esto la pantalla de
-    // confirmación no puede dizer de qué bodega se trata.
+    // confirmación no puede decir de qué bodega se trata.
     config: {
       negocio_nombre: 'Bodega El Buen Precio',
       umbral_stock_bajo: 5,
@@ -260,9 +331,15 @@ function main() {
   }
 
   const pendientes = fiado.filter(f => f.estado === 'pendiente').length
+  const negativos = productos.filter(p => p.stock < 0).length
   process.stderr.write(
-    `Generado: ${productos.length} productos · ${ventas.length} ventas · ${detalle.length} líneas de detalle · ` +
-    `${clientes.length} clientes · ${fiado.length} fiados (${pendientes} pendientes) · ${pagos.length} abonos\n`
+    `Generado: ${productos.length} productos · ${ventas.length} ventas · ${detalle.length} líneas de detalle\n` +
+    `          ${ingresos.length} ingresos · ${detalle_ingresos.length} líneas de ingreso\n` +
+    `          ${clientes.length} clientes · ${fiado.length} fiados (${pendientes} pendientes) · ${pagos.length} abonos\n`
+  )
+  process.stderr.write(
+    `Stock derivado: ${negativos} productos en negativo (faltan por ingresar), ` +
+    `${productos.filter(p => p.stock <= 5).length} en stock bajo\n`
   )
   process.stderr.write(`Promedio ${(detalle.length / ventas.length).toFixed(1)} productos por venta\n`)
   console.log(JSON.stringify(salida))

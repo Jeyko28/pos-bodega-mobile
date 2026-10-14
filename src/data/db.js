@@ -4,6 +4,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage'
 import { normalizar as normalizarTexto } from '../utils/texto'
 import { DIAS_PRUEBA, AVISO_PRUEBA_DESDE, generarIdInstalacion, verificarCodigo, verificarCodigoReset } from './licencia'
 import cronometro from '../utils/cronometro'
+import { recalcularTodoElStock, recalcularProductos } from './stock'
 
 // Antes todos los datos vivían en un solo JSON de AsyncStorage que se reescribía
 // entero en cada venta. Con miles de ventas eso se vuelve lento y arriesgado, así
@@ -173,6 +174,7 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_ventas_gid ON ventas(g_id) WHERE g_id IS N
 CREATE INDEX IF NOT EXISTS idx_pagos_gid ON pagos_fiado(g_id) WHERE g_id IS NOT NULL;
 CREATE INDEX IF NOT EXISTS idx_ingresos_gid ON ingresos(g_id) WHERE g_id IS NOT NULL;
 CREATE INDEX IF NOT EXISTS idx_fiado_gid ON fiado(g_id) WHERE g_id IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_detalle_ingreso_gid ON detalle_ingresos(g_id) WHERE g_id IS NOT NULL;
 CREATE INDEX IF NOT EXISTS idx_productos_mod ON productos(modificado_en);
 CREATE INDEX IF NOT EXISTS idx_clientes_mod ON clientes(modificado_en);
 `
@@ -282,6 +284,7 @@ const COLUMNAS_NUEVAS = [
   ['pagos_fiado', 'g_id', 'TEXT'],
   ['ingresos', 'g_id', 'TEXT'],
   ['fiado', 'g_id', 'TEXT'],
+  ['detalle_ingresos', 'g_id', 'TEXT'],
   ['productos', 'modificado_en', 'TEXT'],
   ['clientes', 'modificado_en', 'TEXT'],
   ['fiado', 'venta_id', 'INTEGER'],
@@ -331,6 +334,7 @@ function completarBackfillSync() {
     if (leerConfig('sync_backfill_hecho', false)) return
     const tablas = [
       ['ventas', 'v'], ['pagos_fiado', 'a'], ['ingresos', 'i'], ['fiado', 'f'],
+      ['detalle_ingresos', 'd'],
     ]
     for (const [tabla, prefijo] of tablas) {
       const filas = sql.getAllSync(`SELECT id FROM ${tabla} WHERE g_id IS NULL`)
@@ -1561,6 +1565,10 @@ export default {
   ingresarMercaderia, getIngresos, getDetalleIngreso, deshacerIngreso,
   getCategoriasCustom, addCategoriaCustom,
   getConfig, updateConfig, getBackupJSON, restaurarBackup, validarBackup,
+  // El stock se recalcula desde el historial, no se acumula. Se expone para que
+  // la sincronización lo llame después de fusionar: al derivarlo, da igual si
+  // los eventos recibidos se aplican una vez o dos.
+  recalcularTodoElStock, recalcularProductos,
   getEstadoLicencia, activarLicencia,
   setBulto,
   getClientes, addCliente, updateCliente, buscarCliente, borrarCliente,

@@ -119,7 +119,7 @@ function construirSQL(d) {
   out.push(leerEsquema())
   out.push('BEGIN;')
 
-  for (const t of ['detalle_ventas', 'ventas', 'pagos_fiado', 'fiado', 'productos', 'clientes', 'categorias_custom', 'usuarios'])
+  for (const t of ['detalle_ventas', 'ventas', 'pagos_fiado', 'fiado', 'productos', 'clientes', 'categorias_custom', 'usuarios', 'detalle_ingresos', 'ingresos'])
     out.push(`DELETE FROM ${t};`)
 
   // Setup: sin esto la app arranca en la pantalla de Welcome y no se puede
@@ -152,6 +152,15 @@ function construirSQL(d) {
 
   d.detalle_ventas.forEach((x, i) =>
     out.push(`INSERT INTO detalle_ventas (id,venta_id,producto_id,nombre_producto,precio_unitario,cantidad,subtotal,tipo_venta,unidad,costo_unitario) VALUES (${i + 1},${x.venta_id},${q(x.producto_id)},${q(x.nombre_producto)},${q(x.precio_unitario)},${q(x.cantidad)},${q(x.subtotal)},${q(x.tipo_venta)},${q(x.unidad)},${q(x.costo_unitario)});`))
+
+  // Los ingresos SÍ se cargan acá, aunque el respaldo de la app no los lleve
+  // (ver README: el respaldo excluye ingresos a propósito, son historial del
+  // teléfono). Sin ellos el stock derivado no tiene con qué trabajar: sale
+  // negativo porque solo ve las ventas.
+  for (const i of (d.ingresos || []))
+    out.push(`INSERT INTO ingresos (id,g_id,fecha,usuario_id,deshecho) VALUES (${i.id},${q(i.g_id)},${q(i.fecha)},1,${i.deshecho || 0});`)
+  for (const x of (d.detalle_ingresos || []))
+    out.push(`INSERT INTO detalle_ingresos (id,g_id,ingreso_id,producto_id,nombre_producto,cantidad) VALUES (${x.id},${q(x.g_id)},${x.ingreso_id},${q(x.producto_id)},${q(x.nombre_producto)},${q(x.cantidad)});`)
 
   for (const f of d.fiado)
     out.push(`INSERT INTO fiado (id,cliente_id,monto_original,saldo,concepto,usuario_id,estado,venta_id,fecha) VALUES (${f.id},${f.cliente_id},${q(f.monto_original)},${q(f.saldo)},${q(f.concepto)},1,${q(f.estado)},${q(f.venta_id)},${q(f.fecha)});`)
