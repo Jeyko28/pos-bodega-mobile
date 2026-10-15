@@ -11,6 +11,7 @@ import { usePieDeHoja } from '../utils/teclado'
 import { coincide } from '../utils/texto'
 import { useSesion } from '../context/SesionContext'
 import { useLetra } from '../context/LetraContext'
+import { useSync } from '../hooks/useSync'
 
 const fmt = (n) => `S/ ${Number(n).toFixed(2)}`
 const METODOS = ['Efectivo', 'Yape', 'Plin']
@@ -47,6 +48,10 @@ export default function ClientesScreen() {
   useFocusEffect(useCallback(() => { cargar() }, []))
 
   function cargar() { setClientes(db.getClientes()) }
+
+  // Jalar hacia abajo actualiza: el otro celular pudo haber traido clientes
+  // nuevos, y esta pantalla es la que más cambia con la sincronización.
+  const { refreshControl } = useSync(cargar, setAviso)
 
   async function guardarCliente() {
     // El nombre es solo letras: los dígitos no se dejan ni tipear (se filtran
@@ -219,6 +224,7 @@ export default function ClientesScreen() {
           </TouchableOpacity>
         )}
         ListEmptyComponent={<Text style={styles.vacio}>{busqueda.trim() ? 'Ningún casero coincide.' : 'No hay clientes registrados todavía.'}</Text>}
+        refreshControl={refreshControl}
       />
 
       {/* Nuevo cliente */}

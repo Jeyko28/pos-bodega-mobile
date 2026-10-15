@@ -8,6 +8,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage'
 
 import db from './src/data/db'
 import { respaldarSiToca } from './src/data/respaldo'
+import { programarSincronizacion } from './src/data/sync'
 import { SesionContext } from './src/context/SesionContext'
 import { LetraProvider } from './src/context/LetraContext'
 import { marcarArranqueListo } from './src/utils/cronometro'
@@ -31,6 +32,15 @@ export default function App() {
   const [errorInicio, setErrorInicio] = useState(null)
 
   useEffect(() => { iniciar() }, [])
+
+  // Sincronización automática. Se programa una sola vez, apenas la base está
+  // lista, y vive por encima de las pantallas: al abrir la app, al volver del
+  // fondo y cada 30 minutos. Las pantallas se enteran por separado (useSync),
+  // así que este useEffect no depende de ninguna.
+  useEffect(() => {
+    if (cargando || setupPendiente) return
+    return programarSincronizacion()
+  }, [cargando, setupPendiente])
 
   async function iniciar() {
     try {

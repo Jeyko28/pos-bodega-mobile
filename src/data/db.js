@@ -5,6 +5,7 @@ import { normalizar as normalizarTexto } from '../utils/texto'
 import { DIAS_PRUEBA, AVISO_PRUEBA_DESDE, generarIdInstalacion, verificarCodigo, verificarCodigoReset } from './licencia'
 import cronometro from '../utils/cronometro'
 import { recalcularTodoElStock, recalcularProductos } from './stock'
+import { fusionarBuzon } from './fusion'
 
 // Antes todos los datos vivían en un solo JSON de AsyncStorage que se reescribía
 // entero en cada venta. Con miles de ventas eso se vuelve lento y arriesgado, así
@@ -210,6 +211,157 @@ async function updateConfig(config) {
     Object.entries(config).forEach(([clave, valor]) => escribirConfig(clave, valor))
   })
   return getConfig()
+}
+
+// ─── BUZÓN DE SINCRONIZACIÓN ─────────────────────────────────────────
+//
+// Lo que este dispositivo cambió desde la última sincronización, para
+// publicarlo. El `g_id` es lo que hace que la otra ponta pueda distinguir
+// "esta venta" de "la venta que ya tenía".
+
+const VENTANA_SYNC_MS = 90 * 24 * 60 * 60 * 1000  // 90 días
+
+/**
+ * Arma el buzón con los cambios de este dispositivo.
+ *
+ * Se toma todo lo más nuevo que la última sincronización. La ventana de 90
+ * días es una red de seguridad: si la marca se perdiera, el otro dispositivo
+ * recibe los últimos tres meses en vez de perderlos. El g_id evita duplicados
+ * de todas formas, así que reenviar es inofensivo.
+ */
+function getBuzonPendiente() {
+  const ultima = leerConfig('sync_ultima_en', null)
+  const desde = ultima
+    ? Date.parse(ultima)
+    : Date.now() - VENTANA_SYNC_MS
+  const desdeISO = new Date(desde).toISOString()
+
+  // ─── Ventas ────────────────────────────────────────────────────────
+  // El `anulada` viaja: si el cajero anuló una venta y el otro celular todavía
+  // no lo sabe, sin este campo la venta resucitaría como si fuera válida.
+  const ventas = sql.getAllSync(
+    `SELECT v.id, v.g_id, v.total, v.subtotal_bruto, v.descuento, v.tipo_descuento,
+            v.monto_recibido, v.vuelto, v.metodo_pago, v.es_fiado, v.comprador_nombre,
+            v.comprador_dni_ruc, v.fecha, v.anulada, c.nombre AS cliente_nombre
+       FROM ventas v LEFT JOIN clientes c ON c.id = v.cliente_id
+      WHERE v.g_id IS NOT NULL AND v.fecha >= ?
+      ORDER BY v.id`,
+    desdeISO
+  )
+
+  // ─── Detalle de ventas ──────────────────────────────────────────────
+  // Viaja por `venta_g_id`, no por `venta_id`: el id del otro dispositivo no
+  // significa nada acá. `producto_id` tampoco — el otro celular puede numerar
+  // su catálogo distinto. Se manda el nombre, que es lo que la pantalla
+  // muestra, y la fusión lo resuelve contra el catálogo local.
+  const idsVentas = ventas.map(v => v.id)
+  const detalleVentas = idsVentas.length
+    ? sql.getAllSync(
+        `SELECT dv.g_id, dv.venta_id, p.nombre AS producto_nombre, dv.precio_unitario,
+                dv.cantidad, dv.subtotal, dv.tipo_venta, dv.unidad, dv.costo_unitario
+           FROM detalle_ventas dv LEFT JOIN productos p ON p.id = dv.producto_id
+          WHERE dv.venta_id IN (${idsVentas.map(() => '?').join(',')})`,
+        ...idsVentas
+      ).map(d => ({ ...d, venta_g_id: ventas.find(v => v.id === d.venta_id)?.g_id }))
+    : []
+
+  // ─── Ingresos (de dónde sale el stock) ──────────────────────────────
+  const ingresos = sql.getAllSync(
+    'SELECT g_id, fecha, deshecho FROM ingresos WHERE g_id IS NOT NULL AND fecha >= ? ORDER BY id',
+    desdeISO
+  )
+  const idsIngresos = ingresos.map(i => i.id)
+  const detalleIngresos = idsIngresos.length
+    ? sql.getAllSync(
+        `SELECT di.g_id, di.ingreso_id, p.nombre AS producto_nombre, di.cantidad
+           FROM detalle_ingresos di LEFT JOIN productos p ON p.id = di.producto_id
+          WHERE di.ingreso_id IN (${idsIngresos.map(() => '?').join(',')})`,
+        ...idsIngresos
+      ).map(d => ({
+        g_id: d.g_id || `d_${d.ingreso_id}_${d.producto_nombre}`,
+        ingreso_g_id: ingresos.find(i => i.id === d.ingreso_id)?.g_id,
+        producto_nombre: d.producto_nombre,
+        cantidad: d.cantidad,
+      }))
+    : []
+
+  // ─── Fiado y abonos ────────────────────────────────────────────────
+  // El cliente viaja por nombre: los ids de cliente tampoco coinciden entre
+  // celulares. Un fiado sin cliente reconocible se guarda igual (la plata se
+  // debe) pero queda sin cliente asignado, y se empareja cuando la ficha del
+  // cliente llegue.
+  const fiados = sql.getAllSync(
+    `SELECT f.g_id, f.monto_original, f.saldo, f.concepto, f.estado, f.fecha,
+            c.nombre AS cliente_nombre
+       FROM fiado f LEFT JOIN clientes c ON c.id = f.cliente_id
+      WHERE f.g_id IS NOT NULL AND f.fecha >= ?
+      ORDER BY f.id`,
+    desdeISO
+  )
+  const idsFiados = fiados.map(f => f.id)
+  const pagos = idsFiados.length
+    ? sql.getAllSync(
+        `SELECT g_id, fiado_id, monto, metodo_pago, anulado, fecha
+           FROM pagos_fiado WHERE fiado_id IN (${idsFiados.map(() => '?').join(',')})`,
+        ...idsFiados
+      ).map(p => ({ ...p, fiado_g_id: fiados.find(f => f.id === p.fiado_id)?.g_id }))
+    : []
+
+  return {
+    dispositivo: idDispositivo(),
+    version: Number(leerConfig('sync_version', 0)) + 1,
+    ventas,
+    detalle_ventas: detalleVentas,
+    ingresos,
+    detalle_ingresos: detalleIngresos,
+    fiados,
+    pagos_fiado: pagos,
+    // El catálogo y los clientes van COMPLETOS, no solo lo que cambió.
+    //
+    // Las ventas y los ingresos se filtran por fecha porque son los que
+    // crecen sin parar. El catálogo no: una bodega tiene dos o trescientos
+    // productos y mandarlos enteros son unas 30 KB — menos que una foto. A
+    // cambio, el otro celular SIEMPRE tiene el producto al que se refiere una
+    // venta que le llega, y el stock se puede recalcular. Mandando solo lo
+    // modificado, una venta de un producto creado hace seis meses llegaría
+    // apuntando a nada.
+    productos: sql.getAllSync(
+      'SELECT nombre, precio, codigo, categoria, tipo_venta, unidad, costo, modificado_en, creado_en FROM productos ORDER BY id'
+    ),
+    clientes: sql.getAllSync(
+      'SELECT nombre, telefono, referencia, dni_ruc, modificado_en, creado_en FROM clientes ORDER BY id'
+    ),
+  }
+}
+
+function marcarSincronizado(firma) {
+  escribirConfig('sync_ultima_en', new Date().toISOString())
+  escribirConfig('sync_version', Number(leerConfig('sync_version', 0)) + 1)
+  if (firma) escribirConfig('sync_firma', firma)
+}
+
+/**
+ * Una huella barata de "hay algo nuevo que publicar".
+ *
+ * Sin esto, cada 30 minutos se subirían los mismos 50 KB de catálogo a Drive
+ * aunque la bodeguera no hubiera vendido nada. Son seis consultas de conteo
+ * (un milisegundo) y a cambio el celular no gasta datos ni radio.
+ *
+ * No es un hash del contenido: si se borra una venta y se crea otra en el
+ * mismo minuto, el conteo no cambia y no se sube. Eso es inofensivo, porque
+ * la sincronización es de sumar, y un cambio de esa clase se resuelve en la
+ * siguiente venta.
+ */
+function getFirmaBuzon() {
+  const conteo = (tabla) =>
+    sql.getFirstSync(`SELECT COUNT(*) n, IFNULL(MAX(id),0) m FROM ${tabla}`) || { n: 0, m: 0 }
+  const v = conteo('ventas')
+  const i = conteo('ingresos')
+  const f = conteo('fiado')
+  const p = conteo('pagos_fiado')
+  const pr = conteo('productos')
+  const c = conteo('clientes')
+  return [v.n, v.m, i.n, i.m, f.n, f.m, p.n, p.m, pr.n, pr.m, c.n, c.m].join(':')
 }
 
 // ─── LICENCIA (pago único, 100% offline) ─────────────────────────────
@@ -1569,6 +1721,17 @@ export default {
   // la sincronización lo llame después de fusionar: al derivarlo, da igual si
   // los eventos recibidos se aplican una vez o dos.
   recalcularTodoElStock, recalcularProductos,
+  // Fusiona lo que vino de otro dispositivo. Se apoya en el g_id: si ya tengo
+  // esa venta, la ignoro; si no, la sumo. Ninguna venta se puede perder, y el
+  // stock se recalcula desde el historial en vez de ajustarse.
+  fusionarBuzon: (buzon) => fusionarBuzon(sql, buzon, (s, ids) => {
+    const n = recalcularProductos(s, ids)
+    return { cambiados: n }
+  }),
+  // Lo que este celular cambió desde la última sincronización, y la marca de
+  // "ya lo publiqué". El g_id de cada fila es lo que permite al otro celular
+  // sumar sin duplicar y sin perder nada.
+  getBuzonPendiente, marcarSincronizado, getFirmaBuzon, leerConfig, idDispositivo,
   getEstadoLicencia, activarLicencia,
   setBulto,
   getClientes, addCliente, updateCliente, buscarCliente, borrarCliente,

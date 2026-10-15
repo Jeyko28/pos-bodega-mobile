@@ -17,6 +17,7 @@ import AvisoHoja from '../components/AvisoHoja'
 import LicenciaScreen from './LicenciaScreen'
 import { useLetra } from '../context/LetraContext'
 import { chips } from '../theme/chips'
+import { useSync } from '../hooks/useSync'
 import * as Haptics from 'expo-haptics'
 
 const fmt = (n) => `S/ ${Number(n).toFixed(2)}`
@@ -113,6 +114,11 @@ export default function POSScreen() {
   }
 
   useFocusEffect(useCallback(() => { cargar() }, []))
+
+  // Jalar hacia abajo actualiza. Se pasa el `mostrarAviso` de esta pantalla
+  // para que el aviso de "se actualizaron 3 ventas" salga con la animación que
+  // ya usa el POS, y no con una nueva.
+  const { refreshControl } = useSync(cargar, mostrarAviso)
 
   async function cargar() {
     // Volver a esta pestaña es lo que más se repite en el día: el bodeguero
@@ -624,6 +630,7 @@ export default function POSScreen() {
           </TouchableOpacity>
         )}
         ListEmptyComponent={<Text style={styles.vacio}>No hay productos que coincidan.</Text>}
+        refreshControl={refreshControl}
       />
       )}
 

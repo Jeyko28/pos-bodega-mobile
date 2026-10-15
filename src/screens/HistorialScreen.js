@@ -9,6 +9,7 @@ import { usePieDeHoja } from '../utils/teclado'
 import AvisoHoja from '../components/AvisoHoja'
 import { useSesion } from '../context/SesionContext'
 import { useLetra } from '../context/LetraContext'
+import { useSync } from '../hooks/useSync'
 
 const fmt = (n) => `S/ ${Number(n).toFixed(2)}`
 const hora = (iso) => new Date(iso).toLocaleTimeString('es-PE', { hour: '2-digit', minute: '2-digit' })
@@ -136,6 +137,11 @@ export default function HistorialScreen() {
     setCaja(db.getEstadoCaja())
     cargarResumen(periodo)
   }
+
+  // Jalar hacia abajo actualiza. En el historial es donde más se nota: si la
+  // hija vendió en el celular de su madre y la dueña está viendo "Hoy", aparece
+  // la venta sin que nadie tenga que apretar nada.
+  const { refreshControl } = useSync(recargar)
 
   async function corregirMetodo(metodo) {
     const r = await db.cambiarMetodoPago(ventaSel.id, metodo)
@@ -294,6 +300,7 @@ export default function HistorialScreen() {
           </TouchableOpacity>
         )}
         ListEmptyComponent={<Text style={styles.vacio}>{metodoFiltro ? `No hay ventas con ${metodoFiltro} ${etiquetaPeriodo}.` : `Todavía no hay ventas ${etiquetaPeriodo}.`}</Text>}
+        refreshControl={refreshControl}
       />
 
       <Modal visible={vistaCaja === 'salida'} transparent animationType="slide" onRequestClose={cerrarVistaCaja}>
